@@ -1,0 +1,60 @@
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+import time
+
+# This is a demonstration of Selenium accessing data from Sacramento County's agenda system.
+
+driver = webdriver.Chrome()
+driver.get('https://agendanet.saccounty.gov/onbaseagendaonline')
+driver.maximize_window()
+
+time.sleep(1)
+
+search_link = driver.find_element(By.LINK_TEXT, 'Search')
+search_link.click()
+
+time.sleep(1)
+
+
+meeting_type_span = driver.find_element(By.ID, 'lblMeetingTypeIDs')
+meeting_type_span.click()
+
+time.sleep(1)
+
+
+checkbox = driver.find_element(By.CSS_SELECTOR, 'input[type="checkbox"][value="106"]')
+if not checkbox.is_selected():
+    checkbox.click()
+
+
+time.sleep(1)
+
+
+meeting_type_span = driver.find_element(By.ID, 'lblMeetingTypeIDs')
+meeting_type_span.click()
+
+
+time.sleep(1)
+
+
+search_button = driver.find_element(By.ID, 'btnSearch')
+search_button.click()
+
+
+time.sleep(1)
+
+links = driver.find_elements(By.CSS_SELECTOR, "a[id^='lnkMeetingAgendaDoc_']")
+for link in links:
+    if link.is_displayed():
+        agenda_link = link
+        break
+pdf_url = agenda_link.get_attribute('href')
+agenda_link.click()
+
+
+time.sleep(1)
+
+
+
+driver.close()
+
