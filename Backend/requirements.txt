@@ -1,0 +1,9 @@
+selenium
+os
+pandas
+pathlib
+glob
+date
+time
+ollama
+rich

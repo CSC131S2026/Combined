@@ -1,0 +1,218 @@
+[
+  {
+    "id": "test-0001",
+    "analyzed_at": "2026-04-21T10:00:00.000000+00:00",
+    "source": {
+      "file": "BOARD_OF_SUPERVISORS_TEST_Agenda_Packet_3_15_2024.pdf.txt",
+      "page": 3
+    },
+    "conflict": {
+      "match": true,
+      "confidence": "high",
+      "reasoning": "John Martinez has a disclosed financial interest in Sacramento Properties LLC, which is the vendor on agenda item 7 for a $2.4M facilities contract."
+    },
+    "form700": {
+      "officials": ["John Martinez"],
+      "entities": ["Sacramento Properties LLC"]
+    },
+    "keywords_matched": ["contract", "vendor"]
+  },
+  {
+    "id": "test-0002",
+    "analyzed_at": "2026-04-21T10:01:00.000000+00:00",
+    "source": {
+      "file": "BOARD_OF_SUPERVISORS_TEST_Agenda_Packet_3_15_2024.pdf.txt",
+      "page": 11
+    },
+    "conflict": {
+      "match": true,
+      "confidence": "medium",
+      "reasoning": "John Martinez's spouse is listed as a partner at Greenfield Consulting, which submitted a bid on agenda item 14."
+    },
+    "form700": {
+      "officials": ["John Martinez"],
+      "entities": ["Greenfield Consulting"]
+    },
+    "keywords_matched": ["bid", "spouse"]
+  },
+  {
+    "id": "test-0003",
+    "analyzed_at": "2026-04-21T10:02:00.000000+00:00",
+    "source": {
+      "file": "BOARD_OF_SUPERVISORS_TEST_Agenda_Packet_3_15_2024.pdf.txt",
+      "page": 19
+    },
+    "conflict": {
+      "match": true,
+      "confidence": "low",
+      "reasoning": "John Martinez disclosed ownership interest in a real estate trust that may hold property adjacent to the proposed zoning change in agenda item 22."
+    },
+    "form700": {
+      "officials": ["John Martinez"],
+      "entities": ["Valley Real Estate Trust"]
+    },
+    "keywords_matched": ["ownership interest", "interest"]
+  },
+  {
+    "id": "test-0004",
+    "analyzed_at": "2026-04-21T10:03:00.000000+00:00",
+    "source": {
+      "file": "BOARD_OF_SUPERVISORS_TEST_Agenda_Packet_4_02_2024.pdf.txt",
+      "page": 5
+    },
+    "conflict": {
+      "match": true,
+      "confidence": "high",
+      "reasoning": "Diana Reyes holds shares in NorCal Water Solutions, which is named as the sole contractor for the water infrastructure upgrade in agenda item 2. A recusal is warranted."
+    },
+    "form700": {
+      "officials": ["Diana Reyes"],
+      "entities": ["NorCal Water Solutions"]
+    },
+    "keywords_matched": ["recusal", "contract", "financial interest"]
+  },
+  {
+    "id": "test-0005",
+    "analyzed_at": "2026-04-21T10:04:00.000000+00:00",
+    "source": {
+      "file": "BOARD_OF_SUPERVISORS_TEST_Agenda_Packet_4_02_2024.pdf.txt",
+      "page": 17
+    },
+    "conflict": {
+      "match": true,
+      "confidence": "high",
+      "reasoning": "Diana Reyes disclosed a gift exceeding $500 from Capitol Bridge Group, which is a named donor on agenda item 9's grant allocation."
+    },
+    "form700": {
+      "officials": ["Diana Reyes"],
+      "entities": ["Capitol Bridge Group"]
+    },
+    "keywords_matched": ["grant", "donation"]
+  },
+  {
+    "id": "test-0006",
+    "analyzed_at": "2026-04-21T10:05:00.000000+00:00",
+    "source": {
+      "file": "BOARD_OF_SUPERVISORS_TEST_Agenda_Packet_4_02_2024.pdf.txt",
+      "page": 24
+    },
+    "conflict": {
+      "match": true,
+      "confidence": "medium",
+      "reasoning": "Diana Reyes is a limited partner in Eastside Development Fund, which is a co-applicant on the affordable housing development described in agenda item 18."
+    },
+    "form700": {
+      "officials": ["Diana Reyes"],
+      "entities": ["Eastside Development Fund"]
+    },
+    "keywords_matched": ["partner", "ownership interest"]
+  },
+  {
+    "id": "test-0007",
+    "analyzed_at": "2026-04-21T10:06:00.000000+00:00",
+    "source": {
+      "file": "BOARD_OF_SUPERVISORS_TEST_Agenda_Packet_5_10_2024.pdf.txt",
+      "page": 8
+    },
+    "conflict": {
+      "match": true,
+      "confidence": "high",
+      "reasoning": "Carlos Nguyen disclosed income from Pacific Legal Partners, which is the law firm representing the appellant in the land use appeal on agenda item 6. Board member should recuse."
+    },
+    "form700": {
+      "officials": ["Carlos Nguyen"],
+      "entities": ["Pacific Legal Partners"]
+    },
+    "keywords_matched": ["recusal", "board member", "disclosure"]
+  },
+  {
+    "id": "test-0008",
+    "analyzed_at": "2026-04-21T10:07:00.000000+00:00",
+    "source": {
+      "file": "BOARD_OF_SUPERVISORS_TEST_Agenda_Packet_5_10_2024.pdf.txt",
+      "page": 15
+    },
+    "conflict": {
+      "match": true,
+      "confidence": "low",
+      "reasoning": "Carlos Nguyen's domestic partner is employed by Sierra Tech Innovations, which responded to an RFP mentioned in agenda item 11. Indirect relationship warrants disclosure."
+    },
+    "form700": {
+      "officials": ["Carlos Nguyen"],
+      "entities": ["Sierra Tech Innovations"]
+    },
+    "keywords_matched": ["domestic partner", "disclose"]
+  },
+  {
+    "id": "test-0009",
+    "analyzed_at": "2026-04-21T10:08:00.000000+00:00",
+    "source": {
+      "file": "BOARD_OF_SUPERVISORS_TEST_Agenda_Packet_5_10_2024.pdf.txt",
+      "page": 31
+    },
+    "conflict": {
+      "match": true,
+      "confidence": "medium",
+      "reasoning": "Carlos Nguyen has a liability owed to First Valley Bank, which is a co-lender on the bond issuance discussed in agenda item 20."
+    },
+    "form700": {
+      "officials": ["Carlos Nguyen"],
+      "entities": ["First Valley Bank"]
+    },
+    "keywords_matched": ["financial interest", "conflict"]
+  },
+  {
+    "id": "test-0010",
+    "analyzed_at": "2026-04-21T10:09:00.000000+00:00",
+    "source": {
+      "file": "BOARD_OF_SUPERVISORS_TEST_Agenda_Packet_6_18_2024.pdf.txt",
+      "page": 4
+    },
+    "conflict": {
+      "match": true,
+      "confidence": "high",
+      "reasoning": "Patricia Okafor disclosed ownership of commercial real estate at 450 River Blvd, which falls within the boundary of the proposed rezoning zone in agenda item 3. Direct financial conflict."
+    },
+    "form700": {
+      "officials": ["Patricia Okafor"],
+      "entities": ["450 River Blvd Commercial Trust"]
+    },
+    "keywords_matched": ["ownership interest", "financial interest", "conflict of interest"]
+  },
+  {
+    "id": "test-0011",
+    "analyzed_at": "2026-04-21T10:10:00.000000+00:00",
+    "source": {
+      "file": "BOARD_OF_SUPERVISORS_TEST_Agenda_Packet_6_18_2024.pdf.txt",
+      "page": 22
+    },
+    "conflict": {
+      "match": true,
+      "confidence": "medium",
+      "reasoning": "Patricia Okafor received consulting income from Delta Infrastructure Inc., which is a subcontractor listed under the primary vendor on agenda item 16."
+    },
+    "form700": {
+      "officials": ["Patricia Okafor"],
+      "entities": ["Delta Infrastructure Inc."]
+    },
+    "keywords_matched": ["consultant", "contract", "vendor"]
+  },
+  {
+    "id": "test-0012",
+    "analyzed_at": "2026-04-21T10:11:00.000000+00:00",
+    "source": {
+      "file": "BOARD_OF_SUPERVISORS_TEST_Agenda_Packet_6_18_2024.pdf.txt",
+      "page": 38
+    },
+    "conflict": {
+      "match": true,
+      "confidence": "high",
+      "reasoning": "Patricia Okafor and John Martinez both have disclosed interests in Capitol Bridge Group, which appears as a named beneficiary of the discretionary grant in agenda item 27."
+    },
+    "form700": {
+      "officials": ["Patricia Okafor", "John Martinez"],
+      "entities": ["Capitol Bridge Group"]
+    },
+    "keywords_matched": ["grant", "financial interest", "board member"]
+  }
+]
