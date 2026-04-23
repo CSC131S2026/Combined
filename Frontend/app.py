@@ -4,7 +4,7 @@ ConflictDashboard — main orchestrator.
 Coordinates:
   - editorial header / overview shell
   - sidebar controls for data, filters, and exports
-  - asymmetric agent board for summary, confidence, people, and record review
+  - asymmetric agent board for summary, selection focus, people, and record review
   - background data loading via DataLoader
 """
 
@@ -17,8 +17,8 @@ from tkinter import filedialog, messagebox
 import customtkinter as ctk
 
 from agents.browser_agent import BrowserAgent
-from agents.confidence_agent import ConfidenceAgent
 from agents.officials_agent import OfficialsAgent
+from agents.selection_agent import SelectionAgent
 from agents.summary_agent import SummaryAgent
 from core.data_loader import DataLoader, DEFAULT_PATH, BACKEND_DIR
 from core.filter_engine import FilterEngine
@@ -285,7 +285,7 @@ class ConflictDashboard:
             parent,
             fg_color=COLORS["bg_secondary"],
             corner_radius=28,
-            width=312,
+            width=296,
             border_width=1,
             border_color=COLORS["border"],
         )
@@ -569,7 +569,14 @@ class ConflictDashboard:
     # ------------------------------------------------------------------
 
     def _build_content(self, parent) -> None:
-        content = ctk.CTkFrame(parent, fg_color="transparent")
+        # Keep the main analyst stack scrollable so short windows can reach the
+        # overview band and the lower dashboard row without clipping.
+        content = ctk.CTkScrollableFrame(
+            parent,
+            fg_color="transparent",
+            scrollbar_button_color=COLORS["border"],
+            scrollbar_button_hover_color=COLORS["border_strong"],
+        )
         content.grid(row=0, column=1, sticky="nsew")
         content.grid_rowconfigure(1, weight=1)
         content.grid_columnconfigure(0, weight=1)
@@ -578,14 +585,14 @@ class ConflictDashboard:
 
         board = ctk.CTkFrame(content, fg_color="transparent")
         board.grid(row=1, column=0, sticky="nsew")
-        board.grid_rowconfigure(0, weight=0, minsize=300)
+        board.grid_rowconfigure(0, weight=0, minsize=252)
         board.grid_rowconfigure(1, weight=1)
-        board.grid_columnconfigure(0, weight=10)
-        board.grid_columnconfigure(1, weight=11)
-        board.grid_columnconfigure(2, weight=14)
+        board.grid_columnconfigure(0, weight=12, uniform="board")
+        board.grid_columnconfigure(1, weight=11, uniform="board")
+        board.grid_columnconfigure(2, weight=11, uniform="board")
 
         self._summary_agent = SummaryAgent(board, row=0, col=0, colspan=2)
-        self._confidence_agent = ConfidenceAgent(board, row=0, col=2)
+        self._selection_agent = SelectionAgent(board, row=0, col=2)
         self._officials_agent = OfficialsAgent(
             board,
             row=1,
@@ -904,6 +911,31 @@ class ConflictDashboard:
             "match_only": self._match_only_var.get(),
         }
 
+    def _build_focus_context(self) -> dict:
+        official = self._official_var.get()
+        entity = self._entity_var.get()
+
+        official_name = None if official in ("All Officials", "") else official
+        entity_name = None if entity in ("All Entities", "") else entity
+
+        if official_name:
+            return {
+                "kind": "official",
+                "name": official_name,
+                "secondary": (
+                    {"kind": "entity", "name": entity_name}
+                    if entity_name
+                    else None
+                ),
+            }
+        if entity_name:
+            return {
+                "kind": "entity",
+                "name": entity_name,
+                "secondary": None,
+            }
+        return {"kind": None, "name": None, "secondary": None}
+
     def _apply_filters(self) -> None:
         filters = self._build_filter_state()
         self._filtered_records = self._engine.apply(self._all_records, filters)
@@ -921,8 +953,10 @@ class ConflictDashboard:
     def _on_filter_click_from_list(self, kind: str, name: str) -> None:
         if kind == "official":
             self._official_var.set(name)
+            self._entity_var.set("All Entities")
         elif kind == "entity":
             self._entity_var.set(name)
+            self._official_var.set("All Officials")
         self._apply_filters()
 
     # ------------------------------------------------------------------
@@ -932,12 +966,15 @@ class ConflictDashboard:
     def _refresh_all(self) -> None:
         agg = self._all_agg
         fagg = self._filtered_agg
+        focus = self._build_focus_context()
 
         self._summary_agent.update(agg, fagg)
-        self._confidence_agent.update(agg, fagg)
+        self._selection_agent.update(focus, self._filtered_records, fagg)
         self._officials_agent.update(
             fagg.get("officials_counts", {}),
             fagg.get("entities_counts", {}),
+            selected_kind=focus.get("kind"),
+            selected_name=focus.get("name"),
         )
         self._browser_agent.update(self._filtered_records)
         self._update_header_meta()

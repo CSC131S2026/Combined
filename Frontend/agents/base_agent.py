@@ -39,8 +39,8 @@ class BaseAgent(ABC):
             column=col,
             rowspan=rowspan,
             columnspan=colspan,
-            padx=10,
-            pady=10,
+            padx=8,
+            pady=8,
             sticky="nsew",
         )
         self.frame.grid_rowconfigure(1, weight=1)
@@ -57,13 +57,13 @@ class BaseAgent(ABC):
         self.header_frame = ctk.CTkFrame(
             self.frame,
             fg_color="transparent",
-            height=64,
+            height=60,
         )
         self.header_frame.grid(
             row=0,
             column=0,
-            padx=16,
-            pady=(14, 4),
+            padx=14,
+            pady=(12, 3),
             sticky="ew",
         )
         self.header_frame.grid_propagate(False)
@@ -93,7 +93,7 @@ class BaseAgent(ABC):
         self.title_label = ctk.CTkLabel(
             title_stack,
             text=self.get_title(),
-            font=font("headline", size=17),
+            font=font("headline", size=16),
             text_color=COLORS["text_primary"],
         )
         self.title_label.pack(anchor="w")

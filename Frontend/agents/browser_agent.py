@@ -13,12 +13,18 @@ from tkinter import ttk
 import customtkinter as ctk
 
 from agents.base_agent import BaseAgent
+from core.filter_engine import FilterEngine
 from ui.theme import COLORS, font, resolve_color
 
-_BATCH_SIZE = 400
+_BATCH_SIZE = 140
+_BATCH_DELAY_MS = 12
 
 
 class BrowserAgent(BaseAgent):
+
+    def __init__(self, parent, row, col, rowspan=1, colspan=1):
+        self._engine = FilterEngine()
+        super().__init__(parent, row, col, rowspan=rowspan, colspan=colspan)
 
     def get_title(self) -> str:
         return "Record Browser"
@@ -280,9 +286,8 @@ class BrowserAgent(BaseAgent):
             display_name = Path(file_name).name if file_name else "Unknown source"
             file_short = display_name[:44] + "..." if len(display_name) > 47 else display_name
             page = source.get("page", "")
-            f700 = rec.get("form700", {})
-            officials = ", ".join(f700.get("officials", []))
-            entities = ", ".join(f700.get("entities", []))
+            officials = ", ".join(self._engine.extract_official_names(rec))
+            entities = ", ".join(self._engine.extract_entity_names(rec))
             keywords = ", ".join(rec.get("keywords_matched", []))
 
             tags = [conf] if conf else []
@@ -309,7 +314,7 @@ class BrowserAgent(BaseAgent):
         self._pending_offset += len(batch)
 
         if self._pending_offset < self._total_pending:
-            self.frame.after(10, self._insert_batch)
+            self.frame.after(_BATCH_DELAY_MS, self._insert_batch)
             return
 
         self._pending_records = None
@@ -353,8 +358,8 @@ class BrowserAgent(BaseAgent):
         self._detail_page_lbl.configure(text=f"Page {page}")
         self._detail_id_lbl.configure(text=f"ID {rec.get('id', '—')[:8]}")
 
-        officials = rec.get("form700", {}).get("officials", [])
-        entities = rec.get("form700", {}).get("entities", [])
+        officials = self._engine.extract_official_names(rec)
+        entities = self._engine.extract_entity_names(rec)
         keywords = rec.get("keywords_matched", [])
         self._detail_officials.configure(text=", ".join(officials) if officials else "None listed")
         self._detail_entities.configure(text=", ".join(entities) if entities else "None listed")

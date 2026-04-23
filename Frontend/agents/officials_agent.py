@@ -10,6 +10,8 @@ import customtkinter as ctk
 from agents.base_agent import BaseAgent
 from ui.theme import COLORS, font
 
+_MAX_RENDERED_ROWS = 18
+
 
 class OfficialsAgent(BaseAgent):
 
@@ -112,13 +114,11 @@ class OfficialsAgent(BaseAgent):
         )
         summary_lbl.grid(row=1, column=0, sticky="w", padx=14, pady=(0, 6))
 
-        scroll = ctk.CTkScrollableFrame(
+        scroll = ctk.CTkFrame(
             panel,
             fg_color="transparent",
-            scrollbar_button_color=COLORS["border"],
-            scrollbar_button_hover_color=COLORS["border_strong"],
         )
-        scroll.grid(row=2, column=0, sticky="nsew", padx=10, pady=(0, 10))
+        scroll.grid(row=2, column=0, sticky="ew", padx=10, pady=(0, 10))
         scroll.grid_columnconfigure(0, weight=1)
 
         return panel, count_lbl, summary_lbl, scroll
@@ -127,7 +127,21 @@ class OfficialsAgent(BaseAgent):
     # Update
     # ------------------------------------------------------------------
 
-    def update(self, officials_counts: dict, entities_counts: dict) -> None:
+    def update(
+        self,
+        officials_counts: dict,
+        entities_counts: dict,
+        selected_kind: str | None = None,
+        selected_name: str | None = None,
+    ) -> None:
+        self._official_panel.configure(
+            border_color=COLORS["accent_purple"] if selected_kind == "official" and selected_name else COLORS["border"],
+            border_width=2 if selected_kind == "official" and selected_name else 1,
+        )
+        self._entity_panel.configure(
+            border_color=COLORS["accent_green"] if selected_kind == "entity" and selected_name else COLORS["border"],
+            border_width=2 if selected_kind == "entity" and selected_name else 1,
+        )
         self._update_column_summary(
             counts=officials_counts,
             badge=self._official_count_lbl,
@@ -148,6 +162,7 @@ class OfficialsAgent(BaseAgent):
             kind="official",
             accent=COLORS["accent_purple"],
             hover=COLORS["highlight_soft"],
+            selected_name=selected_name if selected_kind == "official" else None,
         )
         self._rebuild_list(
             self._entities_frame,
@@ -155,6 +170,7 @@ class OfficialsAgent(BaseAgent):
             kind="entity",
             accent=COLORS["accent_green"],
             hover=COLORS["highlight_teal"],
+            selected_name=selected_name if selected_kind == "entity" else None,
         )
 
     # ------------------------------------------------------------------
@@ -162,20 +178,30 @@ class OfficialsAgent(BaseAgent):
     # ------------------------------------------------------------------
 
     def _update_column_summary(self, counts: dict, badge, summary, fallback: str, prefix: str) -> None:
-        badge.configure(text=str(len(counts or {})))
+        total = len(counts or {})
+        badge.configure(text=str(total))
         if counts:
             name, count = max(counts.items(), key=lambda item: item[1])
-            summary.configure(text=f"{prefix}: {name} ({count:,})")
+            if total > _MAX_RENDERED_ROWS:
+                summary.configure(
+                    text=(
+                        f"{prefix}: {name} ({count:,}) • "
+                        f"showing top {_MAX_RENDERED_ROWS} of {total:,}; use the sidebar dropdown for the full set"
+                    )
+                )
+            else:
+                summary.configure(text=f"{prefix}: {name} ({count:,})")
         else:
             summary.configure(text=fallback)
 
     def _rebuild_list(
         self,
-        container: ctk.CTkScrollableFrame,
+        container: ctk.CTkFrame,
         counts: dict,
         kind: str,
         accent: str,
         hover: str,
+        selected_name: str | None = None,
     ) -> None:
         for child in container.winfo_children():
             child.destroy()
@@ -185,14 +211,17 @@ class OfficialsAgent(BaseAgent):
             return
 
         sorted_items = sorted(counts.items(), key=lambda item: item[1], reverse=True)
+        rendered_items = sorted_items[:_MAX_RENDERED_ROWS]
+        selected_key = selected_name.casefold() if selected_name else None
 
-        for idx, (name, count) in enumerate(sorted_items):
+        for idx, (name, count) in enumerate(rendered_items):
+            is_selected = selected_key == name.casefold()
             row = ctk.CTkFrame(
                 container,
-                fg_color=COLORS["bg_card"],
+                fg_color=hover if is_selected else COLORS["bg_card"],
                 corner_radius=16,
-                border_width=1,
-                border_color=COLORS["border"],
+                border_width=2 if is_selected else 1,
+                border_color=accent if is_selected else COLORS["border"],
             )
             row.grid(row=idx, column=0, sticky="ew", pady=4, padx=2)
             row.grid_columnconfigure(0, weight=1)
@@ -201,9 +230,9 @@ class OfficialsAgent(BaseAgent):
                 row,
                 text=name,
                 font=font("body_small"),
-                fg_color="transparent",
+                fg_color=hover if is_selected else "transparent",
                 hover_color=hover,
-                text_color=COLORS["text_primary"],
+                text_color=accent if is_selected else COLORS["text_primary"],
                 anchor="w",
                 height=34,
                 corner_radius=12,
@@ -215,9 +244,9 @@ class OfficialsAgent(BaseAgent):
                 row,
                 text=f"{count:,}",
                 font=font("label_bold"),
-                fg_color=hover,
+                fg_color=accent if is_selected else hover,
                 corner_radius=999,
-                text_color=accent,
+                text_color=COLORS["text_inverse"] if is_selected else accent,
                 width=52,
                 height=28,
             )

@@ -1,9 +1,4 @@
-"""
-SummaryAgent — editorial KPI overview panel.
-
-Uses one lead metric card for the active conflict count and a supporting
-cluster of dataset / confidence counters.
-"""
+"""SummaryAgent — compact editorial KPI overview panel."""
 
 import customtkinter as ctk
 
@@ -27,21 +22,21 @@ class SummaryAgent(BaseAgent):
 
     def _build_body(self) -> None:
         body = ctk.CTkFrame(self.frame, fg_color="transparent")
-        body.grid(row=1, column=0, padx=14, pady=(2, 12), sticky="nsew")
+        body.grid(row=1, column=0, padx=12, pady=(0, 12), sticky="nsew")
         body.grid_rowconfigure(0, weight=1)
         body.grid_rowconfigure(1, weight=1)
-        body.grid_columnconfigure(0, weight=3)
+        body.grid_columnconfigure(0, weight=4)
         body.grid_columnconfigure(1, weight=2)
         body.grid_columnconfigure(2, weight=2)
 
         hero = ctk.CTkFrame(
             body,
             fg_color=COLORS["highlight_soft"],
-            corner_radius=24,
+            corner_radius=22,
             border_width=1,
             border_color=COLORS["border"],
         )
-        hero.grid(row=0, column=0, rowspan=2, sticky="nsew", padx=(0, 6), pady=5)
+        hero.grid(row=0, column=0, rowspan=2, sticky="nsew", padx=(0, 5), pady=4)
         hero.grid_columnconfigure(0, weight=1)
 
         ctk.CTkLabel(
@@ -49,33 +44,33 @@ class SummaryAgent(BaseAgent):
             text="Potential conflicts in view",
             font=font("label"),
             text_color=COLORS["text_muted"],
-        ).grid(row=0, column=0, padx=18, pady=(18, 2), sticky="w")
+        ).grid(row=0, column=0, padx=16, pady=(16, 2), sticky="w")
 
         self._hero_value = ctk.CTkLabel(
             hero,
             text="—",
-            font=font("metric", size=44),
+            font=font("metric", size=40),
             text_color=COLORS["danger"],
         )
-        self._hero_value.grid(row=1, column=0, padx=18, sticky="w")
+        self._hero_value.grid(row=1, column=0, padx=16, sticky="w")
 
         self._hero_pct = ctk.CTkLabel(
             hero,
-            text="0.0% of current view",
-            font=font("section", size=13),
+            text="0.0% flag rate in current view",
+            font=font("section", size=12),
             text_color=COLORS["text_primary"],
         )
-        self._hero_pct.grid(row=2, column=0, padx=18, pady=(0, 6), sticky="w")
+        self._hero_pct.grid(row=2, column=0, padx=16, pady=(0, 4), sticky="w")
 
         self._hero_note = ctk.CTkLabel(
             hero,
             text="Load data to begin reviewing conflict signals.",
-            font=font("body"),
+            font=font("body_small"),
             text_color=COLORS["text_secondary"],
             justify="left",
-            wraplength=310,
+            wraplength=260,
         )
-        self._hero_note.grid(row=3, column=0, padx=18, pady=(0, 18), sticky="nw")
+        self._hero_note.grid(row=3, column=0, padx=16, pady=(0, 16), sticky="nw")
 
         self._dataset_val, self._dataset_sub = self._make_value_card(
             body,
@@ -91,7 +86,7 @@ class SummaryAgent(BaseAgent):
             body,
             "High confidence",
             "—",
-            "ready for manual review",
+            "review first",
             COLORS["confidence_high"],
             row=0,
             col=2,
@@ -101,7 +96,7 @@ class SummaryAgent(BaseAgent):
             body,
             "Medium confidence",
             "—",
-            "worth a second look",
+            "secondary pass",
             COLORS["confidence_medium"],
             row=1,
             col=1,
@@ -111,49 +106,12 @@ class SummaryAgent(BaseAgent):
             body,
             "Low confidence",
             "—",
-            "background signal",
+            "monitoring trail",
             COLORS["confidence_low"],
             row=1,
             col=2,
             fill_color=COLORS["highlight_green"],
         )
-
-        footer = ctk.CTkFrame(
-            self.frame,
-            fg_color=COLORS["bg_secondary"],
-            corner_radius=18,
-            border_width=1,
-            border_color=COLORS["border"],
-        )
-        footer.grid(row=2, column=0, padx=14, pady=(0, 14), sticky="ew")
-        footer.grid_columnconfigure(1, weight=1)
-
-        ctk.CTkLabel(
-            footer,
-            text="Flag rate",
-            font=font("label"),
-            text_color=COLORS["text_muted"],
-        ).grid(row=0, column=0, padx=(14, 10), pady=12)
-
-        self._progress_bar = ctk.CTkProgressBar(
-            footer,
-            progress_color=COLORS["accent_purple"],
-            fg_color=COLORS["bg_elevated"],
-            height=14,
-            corner_radius=999,
-        )
-        self._progress_bar.set(0)
-        self._progress_bar.grid(row=0, column=1, padx=(0, 12), pady=12, sticky="ew")
-
-        self._progress_label = ctk.CTkLabel(
-            footer,
-            text="0.0%",
-            font=font("section", size=13),
-            text_color=COLORS["accent_purple"],
-        )
-        self._progress_label.grid(row=0, column=2, padx=(0, 14), pady=12)
-
-        self.frame.grid_rowconfigure(2, weight=0)
 
     def update(self, aggregates: dict, filtered_aggregates: dict = None) -> None:
         agg = aggregates or {}
@@ -181,9 +139,7 @@ class SummaryAgent(BaseAgent):
             self._dataset_sub.configure(text="records loaded")
 
         flagged_share = (flagged / shown) if shown else 0.0
-        self._hero_pct.configure(text=f"{flagged_share * 100:.1f}% of current view")
-        self._progress_bar.set(flagged_share)
-        self._progress_label.configure(text=f"{flagged_share * 100:.1f}%")
+        self._hero_pct.configure(text=f"{flagged_share * 100:.1f}% flag rate in current view")
 
         dominant_conf = max(
             (("high", high), ("medium", medium), ("low", low)),
