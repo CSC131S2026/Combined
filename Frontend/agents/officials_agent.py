@@ -1,22 +1,27 @@
 """
-OfficialsAgent — scrollable lists of officials and entities with record counts.
+OfficialsAgent — side-by-side lists of officials and entities.
 
-Each entry is a clickable button that triggers an external filter callback.
+Each row remains clickable, but the panel is designed as a visual index
+instead of a generic tabbed list.
 """
 
 import customtkinter as ctk
+
 from agents.base_agent import BaseAgent
-from ui.theme import COLORS
+from ui.theme import COLORS, font
 
 
 class OfficialsAgent(BaseAgent):
 
     def __init__(self, parent, row, col, on_filter_click=None, rowspan=1, colspan=1):
-        self._on_filter_click = on_filter_click  # callable(type, name) or None
+        self._on_filter_click = on_filter_click
         super().__init__(parent, row, col, rowspan=rowspan, colspan=colspan)
 
     def get_title(self) -> str:
-        return "OFFICIALS & ENTITIES"
+        return "People and Entities"
+
+    def get_kicker(self) -> str:
+        return "Filter index"
 
     def get_accent_color(self) -> str:
         return COLORS["accent_green"]
@@ -26,112 +31,198 @@ class OfficialsAgent(BaseAgent):
 
     def _build_body(self) -> None:
         body = ctk.CTkFrame(self.frame, fg_color="transparent")
-        body.grid(row=1, column=0, padx=8, pady=(4, 8), sticky="nsew")
+        body.grid(row=1, column=0, padx=14, pady=(2, 14), sticky="nsew")
         body.grid_rowconfigure(0, weight=1)
         body.grid_columnconfigure(0, weight=1)
+        body.grid_columnconfigure(1, weight=1)
 
-        self._tabs = ctk.CTkTabview(
+        (
+            self._official_panel,
+            self._official_count_lbl,
+            self._official_summary_lbl,
+            self._officials_frame,
+        ) = self._build_column(
             body,
-            fg_color=COLORS["bg_elevated"],
-            segmented_button_fg_color=COLORS["bg_card"],
-            segmented_button_selected_color=COLORS["accent_green"],
-            segmented_button_selected_hover_color=COLORS["warning"],
-            segmented_button_unselected_color=COLORS["bg_card"],
-            segmented_button_unselected_hover_color=COLORS["bg_elevated"],
-            text_color=COLORS["text_primary"],
-            border_color=COLORS["border"],
-            border_width=1,
-            corner_radius=8,
+            column=0,
+            title="Officials",
+            accent=COLORS["accent_purple"],
+            fill=COLORS["highlight_soft"],
+            subtitle="Click a name to pivot the full dashboard.",
         )
-        self._tabs.grid(row=0, column=0, sticky="nsew")
-
-        self._tabs.add("Officials")
-        self._tabs.add("Entities")
-
-        # Officials scrollable frame
-        self._officials_frame = ctk.CTkScrollableFrame(
-            self._tabs.tab("Officials"),
-            fg_color="transparent",
-            scrollbar_button_color=COLORS["border"],
-            scrollbar_button_hover_color=COLORS["text_muted"],
+        (
+            self._entity_panel,
+            self._entity_count_lbl,
+            self._entity_summary_lbl,
+            self._entities_frame,
+        ) = self._build_column(
+            body,
+            column=1,
+            title="Entities",
+            accent=COLORS["accent_green"],
+            fill=COLORS["highlight_teal"],
+            subtitle="A live index of organizations mentioned in view.",
         )
-        self._officials_frame.pack(fill="both", expand=True)
-        self._officials_frame.grid_columnconfigure(0, weight=1)
-
-        # Entities scrollable frame
-        self._entities_frame = ctk.CTkScrollableFrame(
-            self._tabs.tab("Entities"),
-            fg_color="transparent",
-            scrollbar_button_color=COLORS["border"],
-            scrollbar_button_hover_color=COLORS["text_muted"],
-        )
-        self._entities_frame.pack(fill="both", expand=True)
-        self._entities_frame.grid_columnconfigure(0, weight=1)
 
         self._placeholder("No data loaded", self._officials_frame)
         self._placeholder("No data loaded", self._entities_frame)
+
+    def _build_column(self, parent, column: int, title: str, accent: str, fill: str, subtitle: str):
+        panel = ctk.CTkFrame(
+            parent,
+            fg_color=fill,
+            corner_radius=22,
+            border_width=1,
+            border_color=COLORS["border"],
+        )
+        panel.grid(row=0, column=column, sticky="nsew", padx=(0, 6) if column == 0 else (6, 0))
+        panel.grid_rowconfigure(2, weight=1)
+        panel.grid_columnconfigure(0, weight=1)
+
+        header = ctk.CTkFrame(panel, fg_color="transparent")
+        header.grid(row=0, column=0, sticky="ew", padx=14, pady=(14, 4))
+        header.grid_columnconfigure(0, weight=1)
+
+        title_lbl = ctk.CTkLabel(
+            header,
+            text=title,
+            font=font("section", size=14),
+            text_color=COLORS["text_primary"],
+        )
+        title_lbl.grid(row=0, column=0, sticky="w")
+
+        count_lbl = ctk.CTkLabel(
+            header,
+            text="0",
+            font=font("label_bold"),
+            text_color=accent,
+            fg_color=COLORS["bg_card"],
+            corner_radius=999,
+            width=46,
+            height=26,
+        )
+        count_lbl.grid(row=0, column=1, sticky="e")
+
+        summary_lbl = ctk.CTkLabel(
+            panel,
+            text=subtitle,
+            font=font("body_small"),
+            text_color=COLORS["text_secondary"],
+            justify="left",
+            wraplength=220,
+        )
+        summary_lbl.grid(row=1, column=0, sticky="w", padx=14, pady=(0, 6))
+
+        scroll = ctk.CTkScrollableFrame(
+            panel,
+            fg_color="transparent",
+            scrollbar_button_color=COLORS["border"],
+            scrollbar_button_hover_color=COLORS["border_strong"],
+        )
+        scroll.grid(row=2, column=0, sticky="nsew", padx=10, pady=(0, 10))
+        scroll.grid_columnconfigure(0, weight=1)
+
+        return panel, count_lbl, summary_lbl, scroll
 
     # ------------------------------------------------------------------
     # Update
     # ------------------------------------------------------------------
 
     def update(self, officials_counts: dict, entities_counts: dict) -> None:
+        self._update_column_summary(
+            counts=officials_counts,
+            badge=self._official_count_lbl,
+            summary=self._official_summary_lbl,
+            fallback="Click a name to pivot the full dashboard.",
+            prefix="Top official",
+        )
+        self._update_column_summary(
+            counts=entities_counts,
+            badge=self._entity_count_lbl,
+            summary=self._entity_summary_lbl,
+            fallback="A live index of organizations mentioned in view.",
+            prefix="Top entity",
+        )
         self._rebuild_list(
             self._officials_frame,
             officials_counts,
             kind="official",
+            accent=COLORS["accent_purple"],
+            hover=COLORS["highlight_soft"],
         )
         self._rebuild_list(
             self._entities_frame,
             entities_counts,
             kind="entity",
+            accent=COLORS["accent_green"],
+            hover=COLORS["highlight_teal"],
         )
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _rebuild_list(self, container: ctk.CTkScrollableFrame, counts: dict, kind: str) -> None:
+    def _update_column_summary(self, counts: dict, badge, summary, fallback: str, prefix: str) -> None:
+        badge.configure(text=str(len(counts or {})))
+        if counts:
+            name, count = max(counts.items(), key=lambda item: item[1])
+            summary.configure(text=f"{prefix}: {name} ({count:,})")
+        else:
+            summary.configure(text=fallback)
+
+    def _rebuild_list(
+        self,
+        container: ctk.CTkScrollableFrame,
+        counts: dict,
+        kind: str,
+        accent: str,
+        hover: str,
+    ) -> None:
         for child in container.winfo_children():
             child.destroy()
 
         if not counts:
-            self._placeholder("No data", container)
+            self._placeholder("No matches in this view", container)
             return
 
-        sorted_items = sorted(counts.items(), key=lambda x: x[1], reverse=True)
+        sorted_items = sorted(counts.items(), key=lambda item: item[1], reverse=True)
 
         for idx, (name, count) in enumerate(sorted_items):
-            row_frame = ctk.CTkFrame(container, fg_color="transparent")
-            row_frame.grid(row=idx, column=0, sticky="ew", pady=1)
-            row_frame.grid_columnconfigure(0, weight=1)
+            row = ctk.CTkFrame(
+                container,
+                fg_color=COLORS["bg_card"],
+                corner_radius=16,
+                border_width=1,
+                border_color=COLORS["border"],
+            )
+            row.grid(row=idx, column=0, sticky="ew", pady=4, padx=2)
+            row.grid_columnconfigure(0, weight=1)
 
             btn = ctk.CTkButton(
-                row_frame,
+                row,
                 text=name,
-                font=ctk.CTkFont("Andale Mono", 10),
+                font=font("body_small"),
                 fg_color="transparent",
-                hover_color=COLORS["bg_elevated"],
+                hover_color=hover,
                 text_color=COLORS["text_primary"],
                 anchor="w",
-                height=26,
+                height=34,
+                corner_radius=12,
                 command=lambda n=name, k=kind: self._handle_click(k, n),
             )
-            btn.grid(row=0, column=0, sticky="ew", padx=(4, 0))
+            btn.grid(row=0, column=0, sticky="ew", padx=(8, 4), pady=6)
 
             badge = ctk.CTkLabel(
-                row_frame,
-                text=str(count),
-                font=ctk.CTkFont("Andale Mono", 10, "bold"),
-                fg_color=COLORS["bg_card"],
-                corner_radius=6,
-                text_color=COLORS["accent_green"],
-                width=36,
-                height=22,
+                row,
+                text=f"{count:,}",
+                font=font("label_bold"),
+                fg_color=hover,
+                corner_radius=999,
+                text_color=accent,
+                width=52,
+                height=28,
             )
-            badge.grid(row=0, column=1, padx=4, pady=2)
+            badge.grid(row=0, column=1, padx=(0, 8), pady=6)
 
-        # Stretch column
         container.grid_columnconfigure(0, weight=1)
 
     def _handle_click(self, kind: str, name: str) -> None:
@@ -144,5 +235,5 @@ class OfficialsAgent(BaseAgent):
             parent,
             text=text,
             text_color=COLORS["text_muted"],
-            font=ctk.CTkFont("Andale Mono", 11),
+            font=font("body_small"),
         ).pack(anchor="w", padx=8, pady=12)

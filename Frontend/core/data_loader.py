@@ -14,7 +14,11 @@ from pathlib import Path
 # Resolve default paths relative to this file's location
 FRONTEND_DIR = Path(__file__).parent.parent       # Frontend/
 BACKEND_DIR  = FRONTEND_DIR.parent / "Backend"
-DEFAULT_PATH = BACKEND_DIR / "conflict_flags.json"
+DEFAULT_PATH = (
+    BACKEND_DIR / "conflict_flags_openai.json"
+    if (BACKEND_DIR / "conflict_flags_openai.json").exists()
+    else BACKEND_DIR / "conflict_flags.json"
+)
 
 
 class DataLoader:

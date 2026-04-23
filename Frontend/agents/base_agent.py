@@ -2,18 +2,16 @@
 Abstract base class for all conflict-of-interest dashboard agents.
 
 Provides:
-  - Standardised two-row frame layout (header + body)
-  - Visual alert / highlight state (border colour + width)
-  - Shared helper: _make_value_card()
-
-Subclasses must implement:
-  get_title(), get_accent_color(), _build_header_controls(),
-  _build_body(), update(...)
+  - a shared editorial card shell
+  - visual alert state handling
+  - helper for compact metric cards
 """
 
 from abc import ABC, abstractmethod
+
 import customtkinter as ctk
-from ui.theme import COLORS
+
+from ui.theme import COLORS, font
 
 
 class BaseAgent(ABC):
@@ -29,18 +27,20 @@ class BaseAgent(ABC):
         self.parent = parent
         self._alert_active = False
 
-        # Outer card frame
         self.frame = ctk.CTkFrame(
             parent,
             fg_color=COLORS["bg_card"],
-            corner_radius=12,
+            corner_radius=26,
             border_width=1,
             border_color=COLORS["border"],
         )
         self.frame.grid(
-            row=row, column=col,
-            rowspan=rowspan, columnspan=colspan,
-            padx=8, pady=8,
+            row=row,
+            column=col,
+            rowspan=rowspan,
+            columnspan=colspan,
+            padx=10,
+            pady=10,
             sticky="nsew",
         )
         self.frame.grid_rowconfigure(1, weight=1)
@@ -56,25 +56,47 @@ class BaseAgent(ABC):
     def _build_header(self) -> None:
         self.header_frame = ctk.CTkFrame(
             self.frame,
-            fg_color=COLORS["bg_elevated"],
-            corner_radius=8,
-            height=46,
+            fg_color="transparent",
+            height=64,
         )
         self.header_frame.grid(
-            row=0, column=0,
-            padx=8, pady=(8, 4),
+            row=0,
+            column=0,
+            padx=16,
+            pady=(14, 4),
             sticky="ew",
         )
         self.header_frame.grid_propagate(False)
         self.header_frame.grid_columnconfigure(0, weight=1)
 
+        title_stack = ctk.CTkFrame(self.header_frame, fg_color="transparent")
+        title_stack.grid(row=0, column=0, sticky="w")
+
+        meta_row = ctk.CTkFrame(title_stack, fg_color="transparent")
+        meta_row.pack(anchor="w", pady=(0, 2))
+
+        ctk.CTkFrame(
+            meta_row,
+            fg_color=self.get_accent_color(),
+            width=34,
+            height=6,
+            corner_radius=999,
+        ).pack(side="left", padx=(0, 8))
+
+        ctk.CTkLabel(
+            meta_row,
+            text=self.get_kicker(),
+            font=font("label"),
+            text_color=COLORS["text_muted"],
+        ).pack(side="left")
+
         self.title_label = ctk.CTkLabel(
-            self.header_frame,
+            title_stack,
             text=self.get_title(),
-            font=ctk.CTkFont("Andale Mono", 13, "bold"),
-            text_color=self.get_accent_color(),
+            font=font("headline", size=17),
+            text_color=COLORS["text_primary"],
         )
-        self.title_label.grid(row=0, column=0, padx=12, pady=6, sticky="w")
+        self.title_label.pack(anchor="w")
 
         self._build_header_controls()
 
@@ -85,6 +107,9 @@ class BaseAgent(ABC):
     @abstractmethod
     def get_accent_color(self) -> str:
         ...
+
+    def get_kicker(self) -> str:
+        return "Panel"
 
     def _build_header_controls(self) -> None:
         """Override to add widgets to the right side of the header."""
@@ -100,6 +125,7 @@ class BaseAgent(ABC):
     def set_alert(self, active: bool, color: str = None) -> None:
         if active == self._alert_active:
             return
+
         self._alert_active = active
         if active:
             self.frame.configure(
@@ -127,37 +153,63 @@ class BaseAgent(ABC):
         col: int = 0,
         rowspan: int = 1,
         colspan: int = 1,
+        fill_color: str | None = None,
     ) -> tuple:
         """
-        Create a compact labelled card with a large value and subtitle.
+        Create a compact metric card with a subtle accent rail.
         Returns (value_label, sub_label) so callers can update them.
         """
-        card = ctk.CTkFrame(parent, fg_color=COLORS["bg_elevated"], corner_radius=8)
-        card.grid(
-            row=row, column=col,
-            rowspan=rowspan, columnspan=colspan,
-            padx=4, pady=4, sticky="nsew",
+        card = ctk.CTkFrame(
+            parent,
+            fg_color=fill_color or COLORS["bg_secondary"],
+            corner_radius=20,
+            border_width=1,
+            border_color=COLORS["border"],
         )
-        card.grid_columnconfigure(0, weight=1)
+        card.grid(
+            row=row,
+            column=col,
+            rowspan=rowspan,
+            columnspan=colspan,
+            padx=5,
+            pady=5,
+            sticky="nsew",
+        )
+        card.grid_columnconfigure(1, weight=1)
+
+        accent = ctk.CTkFrame(
+            card,
+            fg_color=color,
+            width=8,
+            corner_radius=999,
+        )
+        accent.grid(row=0, column=0, rowspan=3, sticky="ns", padx=(12, 10), pady=14)
 
         ctk.CTkLabel(
-            card, text=heading,
-            font=ctk.CTkFont("Andale Mono", 10),
-            text_color=COLORS["text_secondary"],
-        ).grid(row=0, column=0, pady=(10, 0))
+            card,
+            text=heading,
+            font=font("label"),
+            text_color=COLORS["text_muted"],
+            anchor="w",
+        ).grid(row=0, column=1, sticky="w", padx=(0, 14), pady=(14, 0))
 
         val_lbl = ctk.CTkLabel(
-            card, text=value_text,
-            font=ctk.CTkFont("Andale Mono", 32, "bold"),
-            text_color=color,
+            card,
+            text=value_text,
+            font=font("metric_small", size=28),
+            text_color=COLORS["text_primary"],
+            anchor="w",
         )
-        val_lbl.grid(row=1, column=0, pady=(2, 0))
+        val_lbl.grid(row=1, column=1, sticky="w", padx=(0, 14), pady=(1, 0))
 
         sub_lbl = ctk.CTkLabel(
-            card, text=sub_text,
-            font=ctk.CTkFont("Andale Mono", 10),
+            card,
+            text=sub_text,
+            font=font("body_small"),
             text_color=COLORS["text_secondary"],
+            anchor="w",
+            justify="left",
         )
-        sub_lbl.grid(row=2, column=0, pady=(0, 10))
+        sub_lbl.grid(row=2, column=1, sticky="w", padx=(0, 14), pady=(0, 14))
 
         return val_lbl, sub_lbl

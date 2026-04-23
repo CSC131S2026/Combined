@@ -14,6 +14,7 @@ import customtkinter as ctk
 
 from core.email_config import config_exists, load as load_config, save as save_config
 from core.email_sender import EmailSender
+from core.filter_engine import FilterEngine
 from ui.theme import COLORS
 
 
@@ -41,6 +42,7 @@ class EmailDialog(ctk.CTkToplevel):
         super().__init__(parent)
         self._records   = records
         self._officials = officials
+        self._engine    = FilterEngine()
 
         self._smtp_visible = False  # toggles the SMTP settings panel
 
@@ -364,13 +366,12 @@ class EmailDialog(ctk.CTkToplevel):
         for rec in display_records:
             conflict = rec.get("conflict", {})
             source   = rec.get("source",   {})
-            f700     = rec.get("form700",   {})
 
             conf      = conflict.get("confidence", "unknown")
             src_file  = source.get("file",  "unknown")
             page      = source.get("page",  "?")
-            officials = f700.get("officials", [])
-            entities  = f700.get("entities",  [])
+            officials = self._engine.extract_official_names(rec)
+            entities  = self._engine.extract_entity_names(rec)
             reasoning = conflict.get("reasoning", "")
 
             lines.append(f"[{conf.upper()}] {src_file} — Page {page}")
@@ -427,13 +428,26 @@ class EmailDialog(ctk.CTkToplevel):
             return
 
         try:
+            status_suffix = ""
+            if not pw:
+                if config_exists():
+                    pw = load_config().get("sender_password", "")
+                    if pw:
+                        status_suffix = " Existing password preserved."
+                if not pw:
+                    self._set_status(
+                        "Enter an app password before saving SMTP settings.",
+                        COLORS["warning"],
+                    )
+                    return
+
             save_config({
                 "smtp_host":       host,
                 "smtp_port":       port_int,
                 "sender_email":    frm,
                 "sender_password": pw,
             })
-            self._set_status("SMTP settings saved.", COLORS["success"])
+            self._set_status(f"SMTP settings saved.{status_suffix}", COLORS["success"])
         except Exception as exc:
             self._set_status(f"Save failed: {exc}", COLORS["danger"])
 
@@ -475,7 +489,7 @@ class EmailDialog(ctk.CTkToplevel):
                     sender_email   = smtp_cfg["sender_email"],
                     sender_password = smtp_cfg["sender_password"],
                 )
-                sender.send_html(to, subject, html_body)
+                sender.send_html(to, subject, html_body, plain_body=body)
                 self.after(0, self._on_send_success)
             except smtplib.SMTPAuthenticationError:
                 self.after(
@@ -509,16 +523,38 @@ class EmailDialog(ctk.CTkToplevel):
             port = self._port_entry.get().strip()
             frm  = self._from_entry.get().strip()
             pw   = self._pw_entry.get()
-            if host and port and frm and pw:
+            if host and port and frm:
                 try:
-                    return {
-                        "smtp_host":       host,
-                        "smtp_port":       int(port),
-                        "sender_email":    frm,
-                        "sender_password": pw,
-                    }
+                    port_int = int(port)
                 except ValueError:
                     pass  # fall through to saved config
+                else:
+                    if pw:
+                        return {
+                            "smtp_host":       host,
+                            "smtp_port":       port_int,
+                            "sender_email":    frm,
+                            "sender_password": pw,
+                        }
+
+                    if config_exists():
+                        saved_cfg = load_config()
+                        same_identity = (
+                            saved_cfg.get("smtp_host", "").strip() == host and
+                            int(saved_cfg.get("smtp_port", 0)) == port_int and
+                            saved_cfg.get("sender_email", "").strip() == frm
+                        )
+                        if same_identity and saved_cfg.get("sender_password"):
+                            return {
+                                "smtp_host":       host,
+                                "smtp_port":       port_int,
+                                "sender_email":    frm,
+                                "sender_password": saved_cfg["sender_password"],
+                            }
+
+                        raise ValueError(
+                            "Re-enter the app password after changing SMTP host, port, or sender email."
+                        )
 
         # Try saved config
         if config_exists():

@@ -19,8 +19,8 @@ class FilterEngine:
         filters keys (all optional / nullable):
           confidence  — list[str] of levels to include, e.g. ["high", "medium"]
                         or None / [] to include all
-          official    — str partial match against form700.officials, or None
-          entity      — str partial match against form700.entities, or None
+          official    — str partial match against extracted official labels, or None
+          entity      — str partial match against extracted entity labels, or None
           keyword     — str partial match against keywords_matched, or None
           match_only  — bool; if True, only include records where conflict.match is True
         """
@@ -28,15 +28,14 @@ class FilterEngine:
             return records
 
         conf_filter = filters.get("confidence")  # list or None
-        official    = (filters.get("official") or "").strip().lower()
-        entity      = (filters.get("entity")   or "").strip().lower()
-        keyword     = (filters.get("keyword")  or "").strip().lower()
+        official    = self._normalize_label(filters.get("official") or "").lower()
+        entity      = self._normalize_label(filters.get("entity") or "").lower()
+        keyword     = self._normalize_label(filters.get("keyword") or "").lower()
         match_only  = filters.get("match_only", False)
 
         out = []
         for rec in records:
             conflict = rec.get("conflict", {})
-            form700  = rec.get("form700",  {})
 
             # --- match_only filter ---
             if match_only and not conflict.get("match", False):
@@ -50,13 +49,19 @@ class FilterEngine:
 
             # --- official filter ---
             if official:
-                officials = [o.lower() for o in form700.get("officials", [])]
+                officials = [
+                    self._normalize_label(name).lower()
+                    for name in self.extract_official_names(rec)
+                ]
                 if not any(official in o for o in officials):
                     continue
 
             # --- entity filter ---
             if entity:
-                entities = [e.lower() for e in form700.get("entities", [])]
+                entities = [
+                    self._normalize_label(name).lower()
+                    for name in self.extract_entity_names(rec)
+                ]
                 if not any(entity in e for e in entities):
                     continue
 
@@ -92,10 +97,11 @@ class FilterEngine:
         entities_c:  Counter = Counter()
         keywords_c:  Counter = Counter()
         files_c:     Counter = Counter()
+        official_labels: dict[str, str] = {}
+        entity_labels: dict[str, str] = {}
 
         for rec in records:
             conflict = rec.get("conflict", {})
-            form700  = rec.get("form700",  {})
             source   = rec.get("source",   {})
 
             if conflict.get("match", False):
@@ -104,13 +110,15 @@ class FilterEngine:
             conf = (conflict.get("confidence") or "unknown").lower()
             by_conf[conf] += 1
 
-            for o in form700.get("officials", []):
-                if o:
-                    officials_c[o] += 1
+            for official in self.extract_official_names(rec):
+                key = official.casefold()
+                official_labels.setdefault(key, official)
+                officials_c[key] += 1
 
-            for e in form700.get("entities", []):
-                if e:
-                    entities_c[e] += 1
+            for entity in self.extract_entity_names(rec):
+                key = entity.casefold()
+                entity_labels.setdefault(key, entity)
+                entities_c[key] += 1
 
             for k in rec.get("keywords_matched", []):
                 if k:
@@ -130,8 +138,151 @@ class FilterEngine:
                 "medium": by_conf.get("medium", 0),
                 "low":    by_conf.get("low",    0),
             },
-            "officials_counts": dict(officials_c),
-            "entities_counts":  dict(entities_c),
+            "officials_counts": {
+                official_labels[key]: count
+                for key, count in sorted(officials_c.items(), key=lambda item: official_labels[item[0]].casefold())
+            },
+            "entities_counts": {
+                entity_labels[key]: count
+                for key, count in sorted(entities_c.items(), key=lambda item: entity_labels[item[0]].casefold())
+            },
             "keywords_freq":    dict(keywords_c),
             "top_files":        top_files,
         }
+
+    # ------------------------------------------------------------------
+    # Shared label extraction
+    # ------------------------------------------------------------------
+
+    def extract_official_names(self, rec: dict) -> list[str]:
+        names = list(rec.get("form700", {}).get("officials", []))
+        names.extend(self._extract_attribution_names(rec, kinds={"person", "role"}))
+        return self._dedupe_labels(names)
+
+    def extract_entity_names(self, rec: dict) -> list[str]:
+        names = list(rec.get("form700", {}).get("entities", []))
+        names.extend(self._extract_attribution_names(rec, kinds={"entity"}))
+        return self._dedupe_labels(names)
+
+    def _extract_attribution_names(self, rec: dict, kinds: set[str]) -> list[str]:
+        out: list[str] = []
+        attribution = rec.get("attribution", {})
+        items = [attribution.get("primary_party")] + list(attribution.get("candidates", []) or [])
+
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            label = self._normalize_label(item.get("name", ""))
+            kind = (item.get("type") or "").strip().lower()
+            role = self._normalize_label(item.get("role", ""))
+            source = (item.get("source") or "").strip().lower()
+            if not label or kind not in kinds:
+                continue
+
+            if kind == "person":
+                if self._is_person_like_official_name(label, role, source):
+                    out.append(label)
+                continue
+
+            if kind == "role" and self._is_official_role_name(label):
+                out.append(label)
+                continue
+
+            if kind == "entity":
+                out.append(label)
+
+        return out
+
+    @staticmethod
+    def _dedupe_labels(labels: list[str]) -> list[str]:
+        seen: set[str] = set()
+        out: list[str] = []
+        for raw in labels:
+            label = FilterEngine._normalize_label(raw)
+            if not label:
+                continue
+            key = label.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(label)
+        return out
+
+    @staticmethod
+    def _normalize_label(value: str) -> str:
+        return " ".join((value or "").split())
+
+    @classmethod
+    def _is_person_like_official_name(cls, name: str, role: str, source: str) -> bool:
+        role_l = role.casefold()
+        if source == "form700_entity":
+            return True
+        if any(keyword in role_l for keyword in cls._official_role_keywords()):
+            return True
+        return cls._looks_like_person_name(name)
+
+    @staticmethod
+    def _official_role_keywords() -> tuple[str, ...]:
+        return (
+            "board",
+            "supervisor",
+            "executive",
+            "director",
+            "chief",
+            "chair",
+            "commission",
+            "counsel",
+            "attorney",
+            "sheriff",
+            "clerk",
+            "manager",
+            "administrator",
+            "commissioner",
+            "registrar",
+            "coroner",
+            "defender",
+            "probation",
+            "officer",
+            "planning",
+        )
+
+    @classmethod
+    def _is_official_role_name(cls, name: str) -> bool:
+        label = name.casefold()
+        return any(keyword in label for keyword in cls._official_role_keywords())
+
+    @staticmethod
+    def _looks_like_person_name(name: str) -> bool:
+        blocked_words = {
+            "activity", "agreement", "board", "clerk", "comments", "commission",
+            "compliance", "consultant", "consultants", "contract", "county",
+            "department", "district", "facts", "house", "office", "program",
+            "project", "report", "reporter", "services", "supervisor", "witness",
+        }
+        stopwords = {"a", "an", "and", "for", "from", "in", "of", "on", "or", "the", "to", "under", "with"}
+
+        if not name or "@" in name or any(ch.isdigit() for ch in name):
+            return False
+
+        raw_tokens = [token.strip(".,;:()<>[]{}\"'") for token in name.split()]
+        tokens = [token for token in raw_tokens if token]
+        if not 2 <= len(tokens) <= 4:
+            return False
+
+        stopword_hits = sum(token.casefold() in stopwords for token in tokens)
+        if stopword_hits > 1:
+            return False
+
+        if any(token.casefold() in blocked_words for token in tokens):
+            return False
+
+        valid_tokens = 0
+        for token in tokens:
+            if len(token) > 20:
+                return False
+            if token.isupper() and len(token) > 3:
+                return False
+            if token[:1].isalpha() and token[:1].isupper():
+                valid_tokens += 1
+
+        return valid_tokens >= 2

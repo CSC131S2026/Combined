@@ -96,9 +96,15 @@ class EmailSender:
         msg.attach(MIMEText(body, "plain", "utf-8"))
         self._send_message(msg)
 
-    def send_html(self, to: str, subject: str, html_body: str) -> None:
+    def send_html(
+        self,
+        to: str,
+        subject: str,
+        html_body: str,
+        plain_body: str | None = None,
+    ) -> None:
         """
-        Send an HTML email (with a plain-text fallback stripped from the HTML).
+        Send an HTML email with a plain-text fallback.
 
         Parameters
         ----------
@@ -119,10 +125,12 @@ class EmailSender:
         OSError
             If the network connection cannot be established.
         """
-        # Build a minimal plain-text fallback by stripping HTML tags
-        import re
-        plain = re.sub(r"<[^>]+>", "", html_body)
-        plain = re.sub(r"\n{3,}", "\n\n", plain).strip()
+        if plain_body is None:
+            import re
+            plain = re.sub(r"<[^>]+>", "", html_body)
+            plain = re.sub(r"\n{3,}", "\n\n", plain).strip()
+        else:
+            plain = plain_body.strip()
 
         msg = MIMEMultipart("alternative")
         msg["From"]    = self.sender_email
