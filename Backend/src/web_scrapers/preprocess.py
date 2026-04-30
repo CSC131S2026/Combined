@@ -3,12 +3,20 @@ import os
 import pathlib
 import pandas as pd
 
-def cleanup():
-    output_dir = "src/web_scrapers/output_data"
+OUTPUT_DIR = pathlib.Path(__file__).resolve().parent / "output_data"
+
+
+def _resolve_output_dir(output_dir=None):
+    return pathlib.Path(output_dir) if output_dir else OUTPUT_DIR
+
+
+def cleanup(output_dir=None):
+    output_dir = _resolve_output_dir(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
     pages_for_later = []
 
     for file in os.listdir(output_dir):
-        file_path = os.path.join(output_dir, file)
+        file_path = output_dir / file
         ext = os.path.splitext(file)[1].lower()
 
         if ext == '.pdf':
@@ -27,7 +35,7 @@ def cleanup():
                         'text': page_text
                     })
                 page_texts.append(page.get_text())
-            pathlib.Path(file_path + ".txt").write_text(chr(12).join(page_texts), encoding='utf-8')
+            pathlib.Path(str(file_path) + ".txt").write_text(chr(12).join(page_texts), encoding='utf-8')
 
         elif ext == '.csv':
             try:
@@ -43,12 +51,13 @@ def cleanup():
 
     return pages_for_later
 
-def read_texts():
+def read_texts(output_dir=None):
     pages = []
-    output_dir = "src/web_scrapers/output_data"
+    output_dir = _resolve_output_dir(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
     for file in os.listdir(output_dir):
         if file.lower().endswith('.txt'):
-            file_path = os.path.join(output_dir, file)
+            file_path = output_dir / file
             full_text = pathlib.Path(file_path).read_text(errors='ignore')
             for page_num, page_text in enumerate(full_text.split(chr(12))):
                 page_text = page_text.strip()

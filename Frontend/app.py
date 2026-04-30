@@ -2,24 +2,19 @@
 ConflictDashboard — main orchestrator.
 
 Coordinates:
-  - editorial header / overview shell
-  - sidebar controls for data, filters, and exports
-  - asymmetric agent board for summary, selection focus, people, and record review
+  - sidebar controls for source selection, filters, and sharing
+  - a single record browser workspace for conflict review
   - background data loading via DataLoader
 """
 
 import csv
 import threading
-from datetime import datetime
 from pathlib import Path
 from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
 
 from agents.browser_agent import BrowserAgent
-from agents.officials_agent import OfficialsAgent
-from agents.selection_agent import SelectionAgent
-from agents.summary_agent import SummaryAgent
 from core.data_loader import DataLoader, DEFAULT_PATH, BACKEND_DIR
 from core.filter_engine import FilterEngine
 from ui.email_dialog import EmailDialog
@@ -43,7 +38,6 @@ class ConflictDashboard:
         self._loaded_path: Path | None = None
 
         self._configure_root()
-        self._build_header()
         self._build_body()
 
         self.root.after(100, self._initial_scan_and_load)
@@ -54,172 +48,11 @@ class ConflictDashboard:
 
     def _configure_root(self) -> None:
         self.root.title("Sacramento County — Conflict Signals Dashboard")
-        self.root.geometry("1640x980")
-        self.root.minsize(1260, 840)
+        self.root.geometry("1500x900")
+        self.root.minsize(1120, 720)
         self.root.configure(fg_color=COLORS["bg_primary"])
-        self.root.grid_rowconfigure(0, weight=0)
-        self.root.grid_rowconfigure(1, weight=1)
+        self.root.grid_rowconfigure(0, weight=1)
         self.root.grid_columnconfigure(0, weight=1)
-
-    # ------------------------------------------------------------------
-    # Header
-    # ------------------------------------------------------------------
-
-    def _build_header(self) -> None:
-        hdr = ctk.CTkFrame(
-            self.root,
-            fg_color=COLORS["bg_secondary"],
-            corner_radius=30,
-            border_width=1,
-            border_color=COLORS["border"],
-        )
-        hdr.grid(row=0, column=0, padx=20, pady=(20, 12), sticky="ew")
-        hdr.grid_columnconfigure(0, weight=3)
-        hdr.grid_columnconfigure(1, weight=2)
-
-        left = ctk.CTkFrame(hdr, fg_color="transparent")
-        left.grid(row=0, column=0, padx=(22, 18), pady=22, sticky="nsew")
-
-        ctk.CTkLabel(
-            left,
-            text="Sacramento County ethics review",
-            font=font("label_bold"),
-            text_color=COLORS["text_muted"],
-        ).pack(anchor="w")
-
-        ctk.CTkLabel(
-            left,
-            text="Conflict Signals Dashboard",
-            font=font("hero"),
-            text_color=COLORS["text_primary"],
-        ).pack(anchor="w", pady=(4, 6))
-
-        self._header_desc_lbl = ctk.CTkLabel(
-            left,
-            text=(
-                "A warmer, more legible analyst workspace for reviewing Form 700 matches, "
-                "agenda packets, and the reasoning behind each flagged record."
-            ),
-            font=font("body"),
-            text_color=COLORS["text_secondary"],
-            justify="left",
-            wraplength=620,
-        )
-        self._header_desc_lbl.pack(anchor="w")
-
-        pill_row = ctk.CTkFrame(left, fg_color="transparent")
-        pill_row.pack(anchor="w", pady=(16, 0))
-
-        self._header_file_pill = ctk.CTkLabel(
-            pill_row,
-            text="Source · waiting for data",
-            font=font("label_bold"),
-            text_color=COLORS["text_primary"],
-            fg_color=COLORS["highlight_gold"],
-            corner_radius=999,
-            padx=16,
-            height=32,
-        )
-        self._header_file_pill.pack(side="left", padx=(0, 8))
-
-        self._header_view_pill = ctk.CTkLabel(
-            pill_row,
-            text="0 in view",
-            font=font("label_bold"),
-            text_color=COLORS["text_inverse"],
-            fg_color=COLORS["accent_purple"],
-            corner_radius=999,
-            padx=16,
-            height=32,
-        )
-        self._header_view_pill.pack(side="left")
-
-        stats = ctk.CTkFrame(hdr, fg_color="transparent")
-        stats.grid(row=0, column=1, padx=(0, 22), pady=22, sticky="nsew")
-        stats.grid_columnconfigure(0, weight=1)
-        stats.grid_columnconfigure(1, weight=1)
-        stats.grid_rowconfigure(1, weight=1)
-        stats.grid_rowconfigure(2, weight=1)
-
-        header_actions = ctk.CTkFrame(stats, fg_color="transparent")
-        header_actions.grid(row=0, column=0, columnspan=2, sticky="e", padx=6, pady=(0, 4))
-
-        ctk.CTkLabel(
-            header_actions,
-            text="Appearance",
-            font=font("label"),
-            text_color=COLORS["text_muted"],
-        ).pack(side="left", padx=(0, 8))
-
-        self._appearance_var = ctk.BooleanVar(
-            value=ctk.get_appearance_mode().lower() == "dark"
-        )
-        self._appearance_switch = ctk.CTkSwitch(
-            header_actions,
-            text="Dark mode",
-            variable=self._appearance_var,
-            onvalue=True,
-            offvalue=False,
-            command=self._on_appearance_change,
-            font=font("body_small"),
-            text_color=COLORS["text_secondary"],
-            button_color=COLORS["accent_purple"],
-            button_hover_color=COLORS["accent_violet"],
-            progress_color=COLORS["accent_purple"],
-        )
-        self._appearance_switch.pack(side="left")
-
-        self._header_dataset_value, self._header_dataset_sub = self._make_stat_card(
-            stats, row=1, col=0, title="Loaded records"
-        )
-        self._header_pages_value, self._header_pages_sub = self._make_stat_card(
-            stats, row=1, col=1, title="Pages analyzed"
-        )
-        self._header_model_value, self._header_model_sub = self._make_stat_card(
-            stats, row=2, col=0, title="Provider / model"
-        )
-        self._header_generated_value, self._header_generated_sub = self._make_stat_card(
-            stats, row=2, col=1, title="Generated"
-        )
-
-    def _make_stat_card(self, parent, row: int, col: int, title: str) -> tuple[ctk.CTkLabel, ctk.CTkLabel]:
-        card = ctk.CTkFrame(
-            parent,
-            fg_color=COLORS["bg_card"],
-            corner_radius=22,
-            border_width=1,
-            border_color=COLORS["border"],
-        )
-        card.grid(row=row, column=col, sticky="nsew", padx=6, pady=6)
-        card.grid_columnconfigure(0, weight=1)
-
-        ctk.CTkLabel(
-            card,
-            text=title,
-            font=font("label"),
-            text_color=COLORS["text_muted"],
-        ).grid(row=0, column=0, padx=14, pady=(14, 2), sticky="w")
-
-        value = ctk.CTkLabel(
-            card,
-            text="—",
-            font=font("headline", size=18),
-            text_color=COLORS["text_primary"],
-            justify="left",
-        )
-        value.grid(row=1, column=0, padx=14, sticky="w")
-
-        sub = ctk.CTkLabel(
-            card,
-            text="",
-            font=font("body_small"),
-            text_color=COLORS["text_secondary"],
-            justify="left",
-            wraplength=220,
-        )
-        sub.grid(row=2, column=0, padx=14, pady=(0, 14), sticky="w")
-
-        return value, sub
 
     def _on_appearance_change(self) -> None:
         mode = "dark" if self._appearance_var.get() else "light"
@@ -227,40 +60,21 @@ class ConflictDashboard:
         if hasattr(self, "_browser_agent"):
             self._browser_agent.refresh_theme()
 
-    def _update_header_meta(self) -> None:
+    def _update_sidebar_meta(self) -> None:
         meta = self._meta
         loaded_total = self._all_agg.get("total", len(self._all_records))
         flagged_total = self._all_agg.get("flagged", 0)
+        flagged_visible = self._filtered_agg.get("flagged", 0)
         shown = self._filtered_agg.get("total", len(self._filtered_records))
 
-        pages_analyzed = meta.get("total_pages_analyzed", loaded_total)
-        pages_scanned = meta.get("total_pages_scanned", pages_analyzed)
         provider = meta.get("provider", "dataset")
         model = meta.get("model", "—")
-        prompt_version = meta.get("prompt_version")
-        generated = self._format_generated_at(meta.get("generated_at"))
-        current_name = self._loaded_path.name if self._loaded_path else DEFAULT_PATH.name
 
-        self._header_file_pill.configure(text=f"Source · {current_name}")
-        self._header_view_pill.configure(text=f"{shown:,} in view")
-
-        self._header_dataset_value.configure(text=f"{loaded_total:,}")
-        self._header_dataset_sub.configure(text=f"{flagged_total:,} flagged for follow-up")
-
-        self._header_pages_value.configure(text=f"{pages_analyzed:,}")
-        self._header_pages_sub.configure(text=f"{pages_scanned:,} pages scanned overall")
-
-        self._header_model_value.configure(text=f"{provider.upper()} / {model}")
-        if prompt_version:
-            self._header_model_sub.configure(text=prompt_version)
-        else:
-            self._header_model_sub.configure(text="Current analysis configuration")
-
-        self._header_generated_value.configure(text=generated)
-        if meta.get("mixed_provenance"):
-            self._header_generated_sub.configure(text="Mixed provenance across providers")
-        else:
-            self._header_generated_sub.configure(text="Single-provider output")
+        self._sidebar_records_lbl.configure(text=f"{shown:,} in view / {loaded_total:,} loaded")
+        self._sidebar_flags_lbl.configure(
+            text=f"{flagged_visible:,} conflicts in current view · {flagged_total:,} total flagged"
+        )
+        self._sidebar_model_lbl.configure(text=f"{provider.upper()} / {model}")
 
     # ------------------------------------------------------------------
     # Body layout
@@ -268,7 +82,7 @@ class ConflictDashboard:
 
     def _build_body(self) -> None:
         body = ctk.CTkFrame(self.root, fg_color="transparent")
-        body.grid(row=1, column=0, padx=20, pady=(0, 20), sticky="nsew")
+        body.grid(row=0, column=0, padx=16, pady=16, sticky="nsew")
         body.grid_rowconfigure(0, weight=1)
         body.grid_columnconfigure(0, weight=0)
         body.grid_columnconfigure(1, weight=1)
@@ -284,8 +98,8 @@ class ConflictDashboard:
         sidebar = ctk.CTkFrame(
             parent,
             fg_color=COLORS["bg_secondary"],
-            corner_radius=28,
-            width=296,
+            corner_radius=18,
+            width=316,
             border_width=1,
             border_color=COLORS["border"],
         )
@@ -301,30 +115,14 @@ class ConflictDashboard:
         scroll.pack(fill="both", expand=True, padx=0, pady=0)
         scroll.grid_columnconfigure(0, weight=1)
 
-        intro = ctk.CTkFrame(
-            scroll,
-            fg_color=COLORS["highlight_gold"],
-            corner_radius=22,
-            border_width=1,
-            border_color=COLORS["border"],
-        )
-        intro.pack(fill="x", padx=16, pady=(16, 8))
+        self._section_header(scroll, "Filter settings", "Source, confidence, people, and entity filters.")
+
         ctk.CTkLabel(
-            intro,
-            text="Control rail",
+            scroll,
+            text="Source file",
             font=font("label"),
             text_color=COLORS["text_muted"],
-        ).pack(anchor="w", padx=14, pady=(14, 2))
-        ctk.CTkLabel(
-            intro,
-            text="Choose a source, shape the lens, then export or email the filtered record set.",
-            font=font("body_small"),
-            text_color=COLORS["text_primary"],
-            justify="left",
-            wraplength=250,
-        ).pack(anchor="w", padx=14, pady=(0, 14))
-
-        self._section_header(scroll, "Data source", "The dashboard opens on the latest OpenAI export when available.")
+        ).pack(anchor="w", padx=16, pady=(6, 2))
 
         file_row = ctk.CTkFrame(scroll, fg_color="transparent")
         file_row.pack(fill="x", padx=16, pady=(4, 4))
@@ -374,9 +172,44 @@ class ConflictDashboard:
         )
         self._load_status_lbl.pack(fill="x", padx=16, pady=(0, 12))
 
-        self._divider(scroll)
+        status = ctk.CTkFrame(
+            scroll,
+            fg_color=COLORS["bg_card"],
+            corner_radius=14,
+            border_width=1,
+            border_color=COLORS["border"],
+        )
+        status.pack(fill="x", padx=16, pady=(0, 12))
+        status.grid_columnconfigure(0, weight=1)
 
-        self._section_header(scroll, "Filters", "Use confidence, names, and entities to create a tighter review slice.")
+        self._sidebar_records_lbl = ctk.CTkLabel(
+            status,
+            text="0 in view / 0 loaded",
+            font=font("section"),
+            text_color=COLORS["text_primary"],
+            anchor="w",
+        )
+        self._sidebar_records_lbl.grid(row=0, column=0, padx=14, pady=(12, 1), sticky="ew")
+
+        self._sidebar_flags_lbl = ctk.CTkLabel(
+            status,
+            text="0 conflicts in current view",
+            font=font("body_small"),
+            text_color=COLORS["text_secondary"],
+            anchor="w",
+        )
+        self._sidebar_flags_lbl.grid(row=1, column=0, padx=14, pady=(0, 1), sticky="ew")
+
+        self._sidebar_model_lbl = ctk.CTkLabel(
+            status,
+            text="Provider / model will appear after load",
+            font=font("label"),
+            text_color=COLORS["text_muted"],
+            anchor="w",
+            wraplength=250,
+            justify="left",
+        )
+        self._sidebar_model_lbl.grid(row=2, column=0, padx=14, pady=(0, 12), sticky="ew")
 
         ctk.CTkLabel(
             scroll,
@@ -493,9 +326,27 @@ class ConflictDashboard:
             command=self._reset_filters,
         ).pack(fill="x", padx=16, pady=(0, 12))
 
+        self._appearance_var = ctk.BooleanVar(
+            value=ctk.get_appearance_mode().lower() == "dark"
+        )
+        self._appearance_switch = ctk.CTkSwitch(
+            scroll,
+            text="Dark mode",
+            variable=self._appearance_var,
+            onvalue=True,
+            offvalue=False,
+            command=self._on_appearance_change,
+            font=font("body_small"),
+            text_color=COLORS["text_primary"],
+            button_color=COLORS["accent_purple"],
+            button_hover_color=COLORS["accent_violet"],
+            progress_color=COLORS["accent_purple"],
+        )
+        self._appearance_switch.pack(anchor="w", padx=16, pady=(0, 14))
+
         self._divider(scroll)
 
-        self._section_header(scroll, "Share", "Export the current view or send the filtered records by email.")
+        self._section_header(scroll, "Sharing settings", "Export or email the current filtered record set.")
 
         export_row = ctk.CTkFrame(scroll, fg_color="transparent")
         export_row.pack(fill="x", padx=16, pady=(6, 10))
@@ -569,221 +420,12 @@ class ConflictDashboard:
     # ------------------------------------------------------------------
 
     def _build_content(self, parent) -> None:
-        # Keep the main analyst stack scrollable so short windows can reach the
-        # overview band and the lower dashboard row without clipping.
-        content = ctk.CTkScrollableFrame(
-            parent,
-            fg_color="transparent",
-            scrollbar_button_color=COLORS["border"],
-            scrollbar_button_hover_color=COLORS["border_strong"],
-        )
+        content = ctk.CTkFrame(parent, fg_color="transparent")
         content.grid(row=0, column=1, sticky="nsew")
-        content.grid_rowconfigure(1, weight=1)
+        content.grid_rowconfigure(0, weight=1)
         content.grid_columnconfigure(0, weight=1)
 
-        self._build_overview_band(content)
-
-        board = ctk.CTkFrame(content, fg_color="transparent")
-        board.grid(row=1, column=0, sticky="nsew")
-        board.grid_rowconfigure(0, weight=0, minsize=252)
-        board.grid_rowconfigure(1, weight=1)
-        board.grid_columnconfigure(0, weight=12, uniform="board")
-        board.grid_columnconfigure(1, weight=11, uniform="board")
-        board.grid_columnconfigure(2, weight=11, uniform="board")
-
-        self._summary_agent = SummaryAgent(board, row=0, col=0, colspan=2)
-        self._selection_agent = SelectionAgent(board, row=0, col=2)
-        self._officials_agent = OfficialsAgent(
-            board,
-            row=1,
-            col=0,
-            on_filter_click=self._on_filter_click_from_list,
-        )
-        self._browser_agent = BrowserAgent(board, row=1, col=1, colspan=2)
-
-    def _build_overview_band(self, parent) -> None:
-        band = ctk.CTkFrame(
-            parent,
-            fg_color=COLORS["bg_secondary"],
-            corner_radius=30,
-            border_width=1,
-            border_color=COLORS["border"],
-        )
-        band.grid(row=0, column=0, sticky="ew", pady=(0, 12))
-        band.grid_columnconfigure(0, weight=3)
-        band.grid_columnconfigure(1, weight=2)
-        band.grid_columnconfigure(2, weight=2)
-
-        left = ctk.CTkFrame(band, fg_color="transparent")
-        left.grid(row=0, column=0, padx=(20, 12), pady=20, sticky="nsew")
-
-        self._overview_badge = ctk.CTkLabel(
-            left,
-            text="Awaiting dataset",
-            font=font("label_bold"),
-            text_color=COLORS["text_primary"],
-            fg_color=COLORS["highlight_soft"],
-            corner_radius=999,
-            padx=14,
-            height=28,
-        )
-        self._overview_badge.pack(anchor="w")
-
-        self._overview_title = ctk.CTkLabel(
-            left,
-            text="Load a dataset to begin reviewing conflict signals",
-            font=font("headline", size=22),
-            text_color=COLORS["text_primary"],
-            justify="left",
-            wraplength=560,
-        )
-        self._overview_title.pack(anchor="w", pady=(10, 6))
-
-        self._overview_body = ctk.CTkLabel(
-            left,
-            text="The overview will summarize the current lens, the active filters, and the strongest signals in the file.",
-            font=font("body"),
-            text_color=COLORS["text_secondary"],
-            justify="left",
-            wraplength=620,
-        )
-        self._overview_body.pack(anchor="w")
-
-        filter_card = self._make_overview_card(
-            band,
-            column=1,
-            title="Active lens",
-            fill=COLORS["highlight_gold"],
-        )
-        self._overview_filters_lbl = ctk.CTkLabel(
-            filter_card,
-            text="No filters applied yet.",
-            font=font("body_small"),
-            text_color=COLORS["text_primary"],
-            justify="left",
-            wraplength=250,
-        )
-        self._overview_filters_lbl.grid(row=1, column=0, padx=16, pady=(0, 16), sticky="w")
-
-        standouts_card = self._make_overview_card(
-            band,
-            column=2,
-            title="Standouts",
-            fill=COLORS["highlight_teal"],
-        )
-        self._overview_source_lbl = ctk.CTkLabel(
-            standouts_card,
-            text="Top source: —",
-            font=font("body_small"),
-            text_color=COLORS["text_primary"],
-            justify="left",
-            wraplength=250,
-        )
-        self._overview_source_lbl.grid(row=1, column=0, padx=16, pady=(0, 8), sticky="w")
-
-        self._overview_people_lbl = ctk.CTkLabel(
-            standouts_card,
-            text="Top official / entity: —",
-            font=font("body_small"),
-            text_color=COLORS["text_secondary"],
-            justify="left",
-            wraplength=250,
-        )
-        self._overview_people_lbl.grid(row=2, column=0, padx=16, pady=(0, 16), sticky="w")
-
-    def _make_overview_card(self, parent, column: int, title: str, fill: str):
-        card = ctk.CTkFrame(
-            parent,
-            fg_color=fill,
-            corner_radius=24,
-            border_width=1,
-            border_color=COLORS["border"],
-        )
-        card.grid(row=0, column=column, sticky="nsew", padx=6, pady=16)
-        card.grid_columnconfigure(0, weight=1)
-
-        ctk.CTkLabel(
-            card,
-            text=title,
-            font=font("label"),
-            text_color=COLORS["text_muted"],
-        ).grid(row=0, column=0, padx=16, pady=(16, 8), sticky="w")
-        return card
-
-    def _update_overview_band(self) -> None:
-        meta = self._meta
-        provider = meta.get("provider", "dataset").upper()
-        model = meta.get("model", "—")
-        shown = self._filtered_agg.get("total", len(self._filtered_records))
-        dataset_total = self._all_agg.get("total", len(self._all_records))
-        flagged = self._filtered_agg.get("flagged", 0)
-        share = (flagged / shown) if shown else 0.0
-
-        self._overview_badge.configure(text=f"{provider} · {model}")
-
-        if shown == 0:
-            title = "No records are visible in the current lens"
-            body = "Try broadening the filters or load a different JSON export to continue the review."
-        elif shown == dataset_total:
-            title = f"{flagged:,} potential conflicts across the full dataset"
-            body = (
-                f"The current view includes all {shown:,} loaded records. "
-                f"About {share * 100:.1f}% of them are flagged for follow-up."
-            )
-        else:
-            title = f"{flagged:,} potential conflicts in the current lens"
-            body = (
-                f"The filters narrow the dataset to {shown:,} records out of {dataset_total:,}. "
-                f"About {share * 100:.1f}% of this slice is flagged."
-            )
-        self._overview_title.configure(text=title)
-        self._overview_body.configure(text=body)
-
-        self._overview_filters_lbl.configure(text=self._format_active_filters())
-
-        top_files = self._filtered_agg.get("top_files", [])
-        if top_files:
-            top_file, top_count = top_files[0]
-            source_text = f"Top source: {Path(top_file).name} ({top_count:,})"
-        else:
-            source_text = "Top source: no records in view"
-        self._overview_source_lbl.configure(text=source_text)
-
-        official_text = self._top_label(self._filtered_agg.get("officials_counts", {}), "Official")
-        entity_text = self._top_label(self._filtered_agg.get("entities_counts", {}), "Entity")
-        self._overview_people_lbl.configure(text=f"{official_text}\n{entity_text}")
-
-    def _format_active_filters(self) -> str:
-        parts = []
-        conf = self._conf_var.get()
-        if conf != "All":
-            parts.append(f"Confidence: {conf}")
-        official = self._official_var.get()
-        if official not in ("All Officials", ""):
-            parts.append(f"Official: {official}")
-        entity = self._entity_var.get()
-        if entity not in ("All Entities", ""):
-            parts.append(f"Entity: {entity}")
-        parts.append("Conflicts only" if self._match_only_var.get() else "Matches and non-matches")
-
-        return " • ".join(parts) if parts else "Full dataset with no additional filters."
-
-    @staticmethod
-    def _top_label(counts: dict, prefix: str) -> str:
-        if not counts:
-            return f"{prefix}: none in this view"
-        name, count = max(counts.items(), key=lambda item: item[1])
-        return f"{prefix}: {name} ({count:,})"
-
-    @staticmethod
-    def _format_generated_at(raw_value: str | None) -> str:
-        if not raw_value:
-            return "—"
-        try:
-            dt = datetime.fromisoformat(raw_value.replace("Z", "+00:00"))
-            return dt.strftime("%b %d, %Y %I:%M %p UTC")
-        except Exception:
-            return raw_value
+        self._browser_agent = BrowserAgent(content, row=0, col=0)
 
     # ------------------------------------------------------------------
     # JSON file discovery / loading
@@ -792,8 +434,10 @@ class ConflictDashboard:
     def _scan_json_files(self) -> dict[str, Path]:
         found: dict[str, Path] = {}
         if BACKEND_DIR.is_dir():
-            for path in sorted(BACKEND_DIR.glob("*.json")):
-                found[path.name] = path
+            for pattern in ("conflict_flags*.json", "test_conflicts.json"):
+                for path in sorted(BACKEND_DIR.glob(pattern)):
+                    if "checkpoint" not in path.stem:
+                        found[path.name] = path
         return found
 
     def _preferred_data_name(self) -> str | None:
@@ -841,7 +485,6 @@ class ConflictDashboard:
             text=f"Loading {load_path.name}...",
             text_color=COLORS["text_secondary"],
         )
-        self._header_file_pill.configure(text=f"Source · {load_path.name}")
 
         def _on_success(records, meta):
             self._all_records = records
@@ -856,8 +499,8 @@ class ConflictDashboard:
 
     def _poll_loader(self) -> None:
         drain = self._loader.get_pending_drain()
-        if drain:
-            drain()
+        if drain and not drain():
+            self.root.after(100, self._poll_loader)
 
     def _on_load_complete(self) -> None:
         self._populate_filter_combos()
@@ -911,31 +554,6 @@ class ConflictDashboard:
             "match_only": self._match_only_var.get(),
         }
 
-    def _build_focus_context(self) -> dict:
-        official = self._official_var.get()
-        entity = self._entity_var.get()
-
-        official_name = None if official in ("All Officials", "") else official
-        entity_name = None if entity in ("All Entities", "") else entity
-
-        if official_name:
-            return {
-                "kind": "official",
-                "name": official_name,
-                "secondary": (
-                    {"kind": "entity", "name": entity_name}
-                    if entity_name
-                    else None
-                ),
-            }
-        if entity_name:
-            return {
-                "kind": "entity",
-                "name": entity_name,
-                "secondary": None,
-            }
-        return {"kind": None, "name": None, "secondary": None}
-
     def _apply_filters(self) -> None:
         filters = self._build_filter_state()
         self._filtered_records = self._engine.apply(self._all_records, filters)
@@ -950,35 +568,13 @@ class ConflictDashboard:
         self._match_only_var.set(True)
         self._apply_filters()
 
-    def _on_filter_click_from_list(self, kind: str, name: str) -> None:
-        if kind == "official":
-            self._official_var.set(name)
-            self._entity_var.set("All Entities")
-        elif kind == "entity":
-            self._entity_var.set(name)
-            self._official_var.set("All Officials")
-        self._apply_filters()
-
     # ------------------------------------------------------------------
     # Refresh all agents
     # ------------------------------------------------------------------
 
     def _refresh_all(self) -> None:
-        agg = self._all_agg
-        fagg = self._filtered_agg
-        focus = self._build_focus_context()
-
-        self._summary_agent.update(agg, fagg)
-        self._selection_agent.update(focus, self._filtered_records, fagg)
-        self._officials_agent.update(
-            fagg.get("officials_counts", {}),
-            fagg.get("entities_counts", {}),
-            selected_kind=focus.get("kind"),
-            selected_name=focus.get("name"),
-        )
         self._browser_agent.update(self._filtered_records)
-        self._update_header_meta()
-        self._update_overview_band()
+        self._update_sidebar_meta()
 
     def _record_officials(self, rec: dict) -> list[str]:
         return self._engine.extract_official_names(rec)

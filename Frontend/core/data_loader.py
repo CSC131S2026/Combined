@@ -47,8 +47,10 @@ class DataLoader:
             data = json.load(fh)
 
         records = self._extract_records(data)
-        meta    = data.get("meta", {})
-        meta["summary"] = data.get("summary", {})
+        raw_meta = data.get("meta", {}) if isinstance(data, dict) else {}
+        meta = dict(raw_meta) if isinstance(raw_meta, dict) else {}
+        if isinstance(data, dict):
+            meta["summary"] = data.get("summary", {})
 
         self._cache[key]      = records
         self._meta_cache[key] = meta
@@ -82,8 +84,9 @@ class DataLoader:
             try:
                 item = result_q.get_nowait()
             except queue.Empty:
-                return
+                return False
             kind = item[0]
+            self._pending_drain = None
             if kind == "ok":
                 _, records, meta = item
                 if on_success:
@@ -92,6 +95,7 @@ class DataLoader:
                 _, exc = item
                 if on_error:
                     on_error(exc)
+            return True
 
         t = threading.Thread(target=_worker, daemon=True)
         t.start()
@@ -111,7 +115,85 @@ class DataLoader:
     @staticmethod
     def _extract_records(data: dict | list) -> list:
         if isinstance(data, list):
-            return data
+            return DataLoader._normalize_records(data)
         if isinstance(data, dict):
-            return data.get("results", [])
+            if "results" not in data:
+                raise ValueError("Unexpected JSON structure: expected dict with a 'results' list")
+            results = data["results"]
+            if not isinstance(results, list):
+                raise ValueError("Unexpected JSON structure: 'results' must be a list")
+            return DataLoader._normalize_records(results)
         raise ValueError("Unexpected JSON structure: expected list or dict with 'results' key")
+
+    @staticmethod
+    def _normalize_records(records: list) -> list:
+        normalized = []
+        for index, record in enumerate(records):
+            if not isinstance(record, dict):
+                raise ValueError(f"Unexpected record at index {index}: expected object")
+            normalized.append(DataLoader._normalize_record(record, index))
+        return normalized
+
+    @staticmethod
+    def _normalize_record(record: dict, index: int) -> dict:
+        if isinstance(record.get("source"), dict) and isinstance(record.get("conflict"), dict):
+            return record
+
+        flat_required = {"file", "page", "match", "confidence", "reasoning"}
+        if flat_required.issubset(record):
+            return DataLoader._normalize_flat_record(record)
+
+        raise ValueError(
+            "Unexpected record at index "
+            f"{index}: expected frontend record with source/conflict or flat backend row"
+        )
+
+    @staticmethod
+    def _split_labels(value) -> list[str]:
+        if isinstance(value, list):
+            return [str(item).strip() for item in value if str(item).strip()]
+        if not value:
+            return []
+        return [item.strip() for item in str(value).split(",") if item.strip()]
+
+    @staticmethod
+    def _normalize_flat_record(record: dict) -> dict:
+        provider = record.get("analysis_provider") or record.get("provider")
+        model = record.get("analysis_model") or record.get("model")
+        prompt_version = record.get("analysis_prompt_version") or record.get("prompt_version")
+        responsible_party = record.get("responsible_party") or ""
+
+        return {
+            "id": record.get("id") or f"{record.get('file')}:{record.get('page')}",
+            "analyzed_at": record.get("analyzed_at"),
+            "source": {
+                "file": record.get("file"),
+                "page": record.get("page"),
+            },
+            "conflict": {
+                "match": bool(record.get("match")),
+                "confidence": str(record.get("confidence") or "").lower(),
+                "reasoning": record.get("reasoning") or "",
+            },
+            "form700": {
+                "officials": DataLoader._split_labels(record.get("form700_officials")),
+                "entities": DataLoader._split_labels(record.get("form700_entities")),
+            },
+            "attribution": {
+                "primary_party": {
+                    "name": responsible_party or None,
+                    "type": record.get("responsible_party_type") or "unknown",
+                    "role": record.get("responsible_party_role") or record.get("responsible_role") or None,
+                    "source": record.get("responsibility_source") or None,
+                    "entity": record.get("responsibility_entity") or None,
+                },
+                "candidates": record.get("accountability_candidates") or [],
+            },
+            "keywords_matched": DataLoader._split_labels(record.get("keywords_matched")),
+            "analysis": {
+                "provider": provider,
+                "model": model,
+                "prompt_version": prompt_version,
+                "token_usage": record.get("token_usage") or {},
+            },
+        }

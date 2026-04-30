@@ -1,0 +1,80 @@
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+
+BACKEND_DIR = Path(__file__).resolve().parents[1]
+if str(BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(BACKEND_DIR))
+
+from src.web_scrapers import useful_functions
+
+
+class FakeSwitchTo:
+    def __init__(self, driver):
+        self._driver = driver
+
+    def window(self, handle):
+        self._driver.current_window_handle = handle
+
+
+class FakeDriver:
+    def __init__(self, download_dir):
+        self.download_dir = Path(download_dir)
+        self.current_window_handle = "main"
+        self.window_handles = ["main"]
+        self.switch_to = FakeSwitchTo(self)
+        self.scripts = []
+        self.closed = []
+
+    def execute_script(self, script, *args):
+        self.scripts.append((script, args))
+        self.window_handles.append("download")
+        (self.download_dir / "packet.pdf").write_text("pdf", encoding="utf-8")
+
+    def close(self):
+        handle = self.current_window_handle
+        self.closed.append(handle)
+        if handle in self.window_handles and handle != "main":
+            self.window_handles.remove(handle)
+        self.current_window_handle = self.window_handles[0]
+
+
+class UsefulFunctionsContractTests(unittest.TestCase):
+    def test_wait_for_download_ignores_stale_partial_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            download_dir = Path(tmp)
+            (download_dir / "stale.pdf.crdownload").write_text("", encoding="utf-8")
+            before = set(p.name for p in download_dir.iterdir())
+            (download_dir / "packet.pdf").write_text("pdf", encoding="utf-8")
+
+            self.assertTrue(
+                useful_functions.wait_for_download(
+                    timeout=0.01,
+                    before=before,
+                    download_dir=str(download_dir),
+                )
+            )
+
+    def test_save_files_uses_argumentized_script_and_restores_original_window(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            driver = FakeDriver(tmp)
+            original_download_dir = useful_functions.DOWNLOAD_DIR
+            useful_functions.DOWNLOAD_DIR = str(tmp)
+            try:
+                with patch.object(useful_functions.time, "sleep", return_value=None):
+                    path = useful_functions.save_files("https://example.test/a'quoted.pdf", driver=driver)
+            finally:
+                useful_functions.DOWNLOAD_DIR = original_download_dir
+
+        self.assertEqual(Path(path).name, "packet.pdf")
+        self.assertEqual(driver.current_window_handle, "main")
+        self.assertEqual(driver.closed, ["download"])
+        self.assertEqual(driver.scripts[0][0], "window.open(arguments[0], '_blank');")
+        self.assertEqual(driver.scripts[0][1], ("https://example.test/a'quoted.pdf",))
+
+
+if __name__ == "__main__":
+    unittest.main()

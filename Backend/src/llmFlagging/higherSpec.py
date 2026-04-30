@@ -13,6 +13,7 @@ if str(_repo_root) not in sys.path:
 
 import ollama
 from src.web_scrapers.preprocess import cleanup, read_texts
+from src.llmFlagging.form700_paths import resolve_form700_path
 
 _spec = importlib.util.spec_from_file_location("seven", _repo_root / "src" / "700Parse" / "seven.py")
 _mod = importlib.util.module_from_spec(_spec); _spec.loader.exec_module(_mod)
@@ -24,18 +25,28 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 cleanup()
 pages = read_texts()
-filers = normalize_shf(str(_repo_root / "src" / "700Parse" / "county700.xlsx")) or []
+filers = normalize_shf(str(resolve_form700_path())) or []
 results = []
 
 name_to_filer = {}
 entity_index = {}
+
+
+def _clean_entity(value):
+    if value is None:
+        return ''
+    text = str(value).strip()
+    if not text or text.lower() == 'nan':
+        return ''
+    return text
+
 
 for filer in filers:
     full_name = f"{filer['first_name']} {filer['last_name']}".lower().strip()
     name_to_filer[full_name] = filer
 
     def _index_entity(entity_name, filer=filer):
-        key = entity_name.lower().strip()
+        key = _clean_entity(entity_name).lower()
         if key:
             entity_index.setdefault(key, []).append(filer)
 

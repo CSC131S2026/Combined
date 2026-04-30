@@ -1,6 +1,8 @@
 import pandas as pd
 import os
 
+BASE_FILER_COLUMNS = {'Last Name', 'First Name'}
+
 def find_column(df, keyword):
     kw = keyword.lower()
     for col in df.columns:
@@ -32,31 +34,42 @@ def _get_or_create_filer(filers, row):
         }
     return filers[key]
 
+def _clean_columns(columns):
+    return ["" if pd.isna(col) else str(col).strip() for col in columns]
+
+def _row_has_filer_identity(row):
+    return not pd.isna(row.get('Last Name')) and not pd.isna(row.get('First Name'))
+
 def _fix_header(df):
-    if df.columns.str.contains('Unnamed').any():
-        df.columns = df.iloc[0]
-        df = df.drop([0, 1]).reset_index(drop=True)
-    df.columns = df.columns.str.strip()
+    df.columns = _clean_columns(df.columns)
+    columns = set(df.columns)
+    if not BASE_FILER_COLUMNS.issubset(columns):
+        df.columns = _clean_columns(df.iloc[0])
+        df = df.drop(index=0).reset_index(drop=True)
+        if not df.empty and not _row_has_filer_identity(df.iloc[0]):
+            df = df.drop(index=0).reset_index(drop=True)
     return df
 
-def normalize_shf(file):
+def normalize_shf(file, verbose: bool = False):
     _, file_extension = os.path.splitext(file)
     if file_extension != '.xlsx':
-        print("not a 700 form..")
+        if verbose:
+            print("not a 700 form..")
         return []
 
     filers = {}
     seven_form = pd.read_excel(file, sheet_name=None)
 
     for sheet_name, df in seven_form.items():
-        print(f"Processing: {sheet_name}")
+        if verbose:
+            print(f"Processing: {sheet_name}")
         df = _fix_header(df)
         sheet_lower = sheet_name.lower()
 
         if 'cover' in sheet_lower:
             pass
 
-        elif 'schedule a-1' in sheet_lower:
+        elif 'schedule a-1' in sheet_lower or 'schedule a1' in sheet_lower:
             for _, row in df.iterrows():
                 filer = _get_or_create_filer(filers, row)
                 if filer is None:
@@ -118,5 +131,5 @@ def normalize_shf(file):
     return list(filers.values())
 
 if __name__ == "__main__":
-    file = "county700.xlsx"
+    file = "sac700.xlsx"
     print(normalize_shf(file))

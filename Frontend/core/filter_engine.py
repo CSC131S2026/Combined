@@ -165,6 +165,9 @@ class FilterEngine:
         return self._dedupe_labels(names)
 
     def _extract_attribution_names(self, rec: dict, kinds: set[str]) -> list[str]:
+        if not rec.get("conflict", {}).get("match", False):
+            return []
+
         out: list[str] = []
         attribution = rec.get("attribution", {})
         items = [attribution.get("primary_party")] + list(attribution.get("candidates", []) or [])
