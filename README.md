@@ -118,3 +118,4 @@ The Backend suite covers the Form 700 parser contract, the scraper helpers, and 
 - All three matchers (`higherSpec.py`, `higherSpec_chatollama.py`, `higherSpec_openai.py`) share Form 700 path resolution via `Backend/src/llmFlagging/form700_paths.py`. Set `FORM700_XLSX_PATH` to point them at a different workbook.
 - The parser's `normalize_shf()` is silent by default; pass `verbose=True` for the per-sheet log lines.
 - The OpenAI matcher gracefully continues if the Form 700 workbook is missing; the others raise.
+Tidy 

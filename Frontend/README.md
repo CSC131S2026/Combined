@@ -1,25 +1,26 @@
 # Frontend
 
-A Python GUI starter application built with the standard-library **tkinter** / **ttk** toolkit.
+Tkinter dashboard for triaging conflict-of-interest flags produced by the Backend pipeline. See the [root README](../README.md) for full project context.
 
-## Requirements
-
-- Python 3.8 or later (tkinter is included in the standard library)
-
-## Running the app
+## Run
 
 ```bash
 python main.py
 ```
 
-## What's included
+Requires Python 3.10+; `tkinter` ships with the standard library on standard CPython builds.
 
-| Feature | Description |
-|---|---|
-| Class-based window | `App` subclasses `tk.Tk` for clean encapsulation |
-| Menu bar | File (New / Open / Exit) and Help (About) menus with keyboard shortcuts |
-| Toolbar | Quick-access buttons for common actions |
-| Controls panel | Label, Entry, Combobox, and Checkbutton widgets |
-| Output panel | Scrollable read-only `Text` widget |
-| Status bar | Live status messages at the bottom of the window |
-| Dialogs | `messagebox` examples for info, warning, and confirmation |
+## Layout
+
+- `main.py` — entry point
+- `app.py` — `ConflictDashboard` orchestrator
+- `core/` — data loading, filter engine, email config + sender
+- `agents/` — per-pane agents (browser, officials, selection, summary, confidence)
+- `ui/` — theme and dialogs (e.g. email composer)
+- `tests/` — `unittest` contracts for the data loader and filter engine
+
+## Tests
+
+```bash
+python3 -m unittest discover tests
+```
