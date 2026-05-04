@@ -1,14 +1,13 @@
 """
 Prototype: higherSpec.py migrated to OpenAI Responses + Pydantic structured output.
 """
-import sys, importlib.util, pathlib, re, os, random
+import sys, importlib.util, pathlib, re, os, random, argparse
 
 _repo_root = pathlib.Path(__file__).parents[2]
 if str(_repo_root) not in sys.path:
     sys.path.insert(0, str(_repo_root))
 
-# preprocess.cleanup()/read_texts() use the relative path "src/web_scrapers/output_data",
-# so cwd must be Backend/ (i.e. _repo_root) regardless of where this script was launched.
+# Keep relative output/checkpoint paths anchored to Backend/ regardless of launch cwd.
 os.chdir(_repo_root)
 
 from openai import AsyncOpenAI
@@ -75,7 +74,8 @@ _OPENAI_MAX_OUTPUT_TOKENS = int(os.getenv("OPENAI_CONFLICT_MAX_OUTPUT_TOKENS", "
 _OPENAI_TIMEOUT_SECONDS = float(os.getenv("OPENAI_CONFLICT_TIMEOUT_SECONDS", "60"))
 _OPENAI_MAX_API_RETRIES = int(os.getenv("OPENAI_CONFLICT_MAX_API_RETRIES", "4"))
 _REQUEST_CONCURRENCY = int(os.getenv("OPENAI_CONFLICT_CONCURRENCY", "16"))
-_OUTPUT_STEM = os.getenv("CONFLICT_OUTPUT_STEM", "conflict_flags_openai")
+_FORCE_PREPROCESS = os.getenv("CONFLICT_FORCE_PREPROCESS", "").strip().lower() in {"1", "true", "yes", "on"}
+_DEFAULT_OUTPUT_STEM = "conflict_flags_openai"
 
 
 def _anchor(p):
@@ -83,16 +83,86 @@ def _anchor(p):
     return p if p.is_absolute() else _repo_root / p
 
 
+_IMPORT_LEGACY_CHECKPOINTS = os.getenv("IMPORT_LEGACY_CONFLICT_CHECKPOINTS", "").strip().lower() in {"1", "true", "yes", "on"}
+_SAMPLE_LIMIT = int(os.getenv("OPENAI_CONFLICT_SAMPLE_LIMIT", "0"))  # 0 = no cap
+_DEFAULT_INPUT_YEAR = "2019"
+_DEFAULT_INPUT_BASE = pathlib.Path("src") / "web_scrapers" / "output_data"
+
+
+def _parse_runtime_args(argv=None):
+    parser = argparse.ArgumentParser(
+        description="Analyze conflict-of-interest indicators from scraped agenda text/PDF data.",
+    )
+    parser.add_argument(
+        "--year",
+        default=None,
+        help=f"Input year under src/web_scrapers/output_data/ (default: env CONFLICT_INPUT_YEAR or {_DEFAULT_INPUT_YEAR}).",
+    )
+    parser.add_argument(
+        "--input-dir",
+        default=None,
+        help="Custom directory containing input PDFs/CSVs/TXTs (default: env CONFLICT_INPUT_DIR or output_data/<year>).",
+    )
+    args, unknown = parser.parse_known_args(argv)
+    if unknown:
+        _console.print(f"[{_AMB}]Ignoring unknown CLI argument(s):[/] [{_V3}]{' '.join(unknown)}[/]")
+    return args
+
+
+def _resolve_input_config(args=None, environ=None):
+    args = args or argparse.Namespace(year=None, input_dir=None)
+    environ = environ or os.environ
+    year = (args.year or environ.get("CONFLICT_INPUT_YEAR") or _DEFAULT_INPUT_YEAR).strip() or _DEFAULT_INPUT_YEAR
+    input_dir_value = (args.input_dir or environ.get("CONFLICT_INPUT_DIR") or "").strip()
+
+    if input_dir_value:
+        input_dir = _anchor(input_dir_value).resolve()
+        source = "custom"
+    else:
+        input_dir = _anchor(_DEFAULT_INPUT_BASE / year).resolve()
+        source = "year"
+
+    return {
+        "year": year,
+        "input_dir": input_dir,
+        "source": source,
+    }
+
+
+def _slug(value):
+    return re.sub(r'[^A-Za-z0-9_.-]+', '_', str(value or '').strip()).strip('_') or 'default'
+
+
+def _default_output_stem():
+    if "CONFLICT_OUTPUT_STEM" in os.environ:
+        return os.getenv("CONFLICT_OUTPUT_STEM") or _DEFAULT_OUTPUT_STEM
+    if _INPUT_SOURCE == "year":
+        return f"{_DEFAULT_OUTPUT_STEM}_{_slug(_INPUT_YEAR)}"
+    return f"{_DEFAULT_OUTPUT_STEM}_{_slug(_INPUT_DIR.name or 'custom')}"
+
+
+_RUNTIME_ARGS = _parse_runtime_args()
+_INPUT_CONFIG = _resolve_input_config(_RUNTIME_ARGS)
+_INPUT_YEAR = _INPUT_CONFIG["year"]
+_INPUT_DIR = _INPUT_CONFIG["input_dir"]
+_INPUT_SOURCE = _INPUT_CONFIG["source"]
+_OUTPUT_STEM = _default_output_stem()
 _CSV_OUTPUT = _anchor(os.getenv("CONFLICT_CSV_PATH", f"{_OUTPUT_STEM}.csv"))
 _JSON_OUTPUT = _anchor(os.getenv("CONFLICT_JSON_PATH", f"{_OUTPUT_STEM}.json"))
 _CHECKPOINT = _anchor(os.getenv("CONFLICT_CHECKPOINT_PATH", f"{_OUTPUT_STEM}_checkpoint.json"))
-_IMPORT_LEGACY_CHECKPOINTS = os.getenv("IMPORT_LEGACY_CONFLICT_CHECKPOINTS", "").strip().lower() in {"1", "true", "yes", "on"}
 _LEGACY_CHECKPOINT_CANDIDATES = [
     _anchor(candidate)
     for candidate in os.getenv("LEGACY_CONFLICT_CHECKPOINTS", "conflict_flags_checkpoint.json").split(":")
     if _IMPORT_LEGACY_CHECKPOINTS and candidate.strip()
 ]
-_SAMPLE_LIMIT = int(os.getenv("OPENAI_CONFLICT_SAMPLE_LIMIT", "0"))  # 0 = no cap
+_console.print(
+    f"[{_V4}]Input data:[/] [{_V3}]{_INPUT_DIR}[/] "
+    f"[{_V4}]year=[/] [{_V3}]{_INPUT_YEAR}[/]"
+    + (f" [{_V4}]source=[/] [{_V3}]{_INPUT_SOURCE}[/]" if _INPUT_SOURCE == "custom" else "")
+)
+_console.print(
+    f"[{_V4}]Outputs:[/] [{_V3}]{_CSV_OUTPUT}[/] [{_V4}]·[/] [{_V3}]{_JSON_OUTPUT}[/]"
+)
 
 
 def _require_openai_api_key():
@@ -112,10 +182,14 @@ _client = AsyncOpenAI(api_key=_require_openai_api_key())
 
 
 
-# --- Data loading (unchanged) ---
+# --- Data loading ---
 
-cleanup()
-pages = read_texts()
+cleanup(
+    _INPUT_DIR,
+    force=_FORCE_PREPROCESS,
+    progress=lambda message: _console.print(f"[{_V4}]Preprocess:[/] [{_V3}]{message}[/]"),
+)
+pages = read_texts(_INPUT_DIR)
 
 # Preserve graceful fallback: if the workbook is missing, warn and continue without cross-reference.
 _FORM700_PATH = resolve_form700_path(require_exists=False)
@@ -1040,6 +1114,9 @@ def build_frontend_payload(results, total_scanned, total_analyzed, token_usage=N
             'provider': _PROVIDER_NAME,
             'model': _MODEL_NAME,
             'prompt_version': _PROMPT_VERSION,
+            'input_year': _INPUT_YEAR,
+            'input_dir': str(_INPUT_DIR),
+            'input_source': _INPUT_SOURCE,
             'providers_present': sorted(providers_present),
             'models_present': sorted(models_present),
             'prompt_versions_present': sorted(prompt_versions_present),
@@ -1137,13 +1214,46 @@ def _make_layout(progress: Progress, analyzed: int, conflicts: int, by_conf: dic
 
 _CHECKPOINT_INTERVAL = 10
 _checkpoint_counter = 0
+_CHECKPOINT_WRITES_ENABLED = True
 
 
 def _serialize_page_keys(keys):
     return [{'file': file_name, 'page': page_num} for file_name, page_num in sorted(keys)]
 
 
+def _checkpoint_input_matches(checkpoint_meta):
+    if not isinstance(checkpoint_meta, dict):
+        return False
+    checkpoint_input_dir = _normalize_space(checkpoint_meta.get('input_dir'))
+    checkpoint_input_source = _normalize_space(checkpoint_meta.get('input_source'))
+    checkpoint_input_year = _normalize_space(checkpoint_meta.get('input_year'))
+
+    if not checkpoint_input_dir or not checkpoint_input_source:
+        return False
+    if pathlib.Path(checkpoint_input_dir).resolve() != _INPUT_DIR.resolve():
+        return False
+    if checkpoint_input_source != _INPUT_SOURCE:
+        return False
+    if _INPUT_SOURCE == 'year' and checkpoint_input_year != _INPUT_YEAR:
+        return False
+    return True
+
+
+def _checkpoint_file_matches_current(path):
+    if not path.exists():
+        return False
+    try:
+        with open(path) as fh:
+            data = json.load(fh)
+    except Exception:
+        return False
+    if isinstance(data, list):
+        return False
+    return _checkpoint_input_matches(data.get('meta') or {})
+
+
 def _load_checkpoint():
+    global _CHECKPOINT_WRITES_ENABLED
     checkpoint_path = None
     for candidate in [_CHECKPOINT, *_LEGACY_CHECKPOINT_CANDIDATES]:
         if candidate.exists():
@@ -1158,12 +1268,26 @@ def _load_checkpoint():
 
     checkpoint_meta = {}
     if isinstance(data, list):
+        if checkpoint_path == _CHECKPOINT:
+            _CHECKPOINT_WRITES_ENABLED = False
+            _console.print(
+                f"[{_AMB}]Ignoring checkpoint without input metadata:[/] "
+                f"[{_V3}]{checkpoint_path}[/]"
+            )
+            return [], set(), set(), _empty_token_usage(), None
         raw_results = data
         processed = {(r['file'], r['page']) for r in raw_results if isinstance(r, dict)}
         failed = set()
         token_usage = _sum_token_usage(raw_results)
     else:
         checkpoint_meta = data.get('meta') or {}
+        if checkpoint_path == _CHECKPOINT and not _checkpoint_input_matches(checkpoint_meta):
+            _CHECKPOINT_WRITES_ENABLED = False
+            _console.print(
+                f"[{_AMB}]Ignoring checkpoint with mismatched input metadata:[/] "
+                f"[{_V3}]{checkpoint_path}[/]"
+            )
+            return [], set(), set(), _empty_token_usage(), None
         raw_results = data.get('results', [])
         raw = data.get('processed', [])
         processed = {(e[0], e[1]) if isinstance(e, list) else (e['file'], e['page']) for e in raw}
@@ -1192,6 +1316,8 @@ def _load_checkpoint():
 
 
 def _save_checkpoint(res, processed, failed, token_usage, source_checkpoint=None):
+    if not _CHECKPOINT_WRITES_ENABLED:
+        return
     tmp = _CHECKPOINT.with_suffix('.tmp')
     with open(tmp, 'w') as fh:
         json.dump(
@@ -1201,6 +1327,9 @@ def _save_checkpoint(res, processed, failed, token_usage, source_checkpoint=None
                     'provider': _PROVIDER_NAME,
                     'model': _MODEL_NAME,
                     'prompt_version': _PROMPT_VERSION,
+                    'input_year': _INPUT_YEAR,
+                    'input_dir': str(_INPUT_DIR),
+                    'input_source': _INPUT_SOURCE,
                     'source_checkpoint': str(source_checkpoint) if source_checkpoint else None,
                 },
                 'results': res,
@@ -1328,14 +1457,22 @@ with open(_JSON_OUTPUT, 'w') as fh:
     json.dump(payload, fh, indent=2)
 
 if _failed:
-    _console.print(
-        f"[{_AMB}]Checkpoint retained:[/] [{_V3}]{len(_failed)} page(s) still failed and will be retried on the next run via {_CHECKPOINT}[/]"
-    )
+    if _CHECKPOINT_WRITES_ENABLED:
+        _console.print(
+            f"[{_AMB}]Checkpoint retained:[/] [{_V3}]{len(_failed)} page(s) still failed and will be retried on the next run via {_CHECKPOINT}[/]"
+        )
+    else:
+        _console.print(
+            f"[{_AMB}]Checkpoint not written:[/] [{_V3}]existing checkpoint metadata did not match this input run[/]"
+        )
 else:
-    for _f in (_CHECKPOINT, _CHECKPOINT.with_suffix('.tmp')):
-        if _f.exists():
-            _f.unlink()
-    _console.print(f"[{_V4}]Checkpoint removed.[/]")
+    if _CHECKPOINT_WRITES_ENABLED:
+        for _f in (_CHECKPOINT, _CHECKPOINT.with_suffix('.tmp')):
+            if _checkpoint_file_matches_current(_f):
+                _f.unlink()
+        _console.print(f"[{_V4}]Checkpoint removed.[/]")
+    else:
+        _console.print(f"[{_V4}]Checkpoint left untouched.[/]")
 
 _console.print(
     f"[{_V4}]Written →[/] [{_V3}]{_CSV_OUTPUT}[/]  [{_V4}]·[/]  [{_V3}]{_JSON_OUTPUT}[/]  "

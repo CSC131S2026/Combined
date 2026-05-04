@@ -38,6 +38,19 @@ class PreprocessContractTests(unittest.TestCase):
         self.assertEqual(pages[0]["page"], "CSV")
         self.assertIn("Acme", pages[0]["text"])
 
+    def test_cleanup_skips_pdf_when_text_extract_is_current(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            pdf = Path(tmp) / "packet.pdf"
+            txt = Path(tmp) / "packet.pdf.txt"
+            pdf.write_bytes(b"not a real pdf")
+            txt.write_text("cached page", encoding="utf-8")
+            events = []
+
+            pages = cleanup(tmp, progress=events.append)
+
+        self.assertEqual(pages, [{"file": "packet.pdf", "page": 1, "text": "cached page"}])
+        self.assertTrue(any("Skipping current text extract" in event for event in events))
+
 
 if __name__ == "__main__":
     unittest.main()

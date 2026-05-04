@@ -68,11 +68,15 @@ python src/700Parse/seven.py
 ```bash
 cd Backend
 export OPENAI_API_KEY="sk-..."
+export CONFLICT_INPUT_YEAR=2019            # optional, defaults to 2019
 export OPENAI_CONFLICT_SAMPLE_LIMIT=5     # optional, caps to first N pages for a dry run
 python src/llmFlagging/higherSpec_openai.py
+# or:
+python src/llmFlagging/higherSpec_openai.py --year 2019
+python src/llmFlagging/higherSpec_openai.py --input-dir src/web_scrapers/output_data/2019
 ```
 
-Outputs land at `Backend/conflict_flags_openai.csv` and `.json`, with a `_checkpoint.json` for resumable runs.
+Outputs land at `Backend/conflict_flags_openai_<year>.csv` and `.json`, with a `_checkpoint.json` for resumable runs. For `--input-dir` / `CONFLICT_INPUT_DIR`, the default output stem uses the input directory name instead; `CONFLICT_OUTPUT_STEM`, `CONFLICT_CSV_PATH`, `CONFLICT_JSON_PATH`, and `CONFLICT_CHECKPOINT_PATH` still override that.
 
 ### Conflict matching — local Ollama
 
@@ -88,12 +92,17 @@ python src/llmFlagging/higherSpec_chatollama.py
 | `FORM700_XLSX_PATH` | `Backend/src/700Parse/sac700.xlsx` | Override the Form 700 workbook used by all matchers |
 | `OPENAI_API_KEY` | — | Required for the OpenAI matcher |
 | `OPENAI_CONFLICT_MODEL` | `gpt-5.4-mini` | Model used by the OpenAI matcher |
+| `CONFLICT_INPUT_YEAR` | `2019` | Year folder under `Backend/src/web_scrapers/output_data/<year>` used by the OpenAI matcher |
+| `CONFLICT_INPUT_DIR` | — | Override the OpenAI matcher input directory; takes precedence over `CONFLICT_INPUT_YEAR` |
 | `OPENAI_CONFLICT_SAMPLE_LIMIT` | `0` (no cap) | Cap pages processed — handy for dry runs |
 | `OPENAI_CONFLICT_CONCURRENCY` | `16` | Parallel API requests |
 | `OPENAI_CONFLICT_MAX_OUTPUT_TOKENS` | `200` | Per-response token cap |
 | `OPENAI_CONFLICT_TIMEOUT_SECONDS` | `60` | Per-request timeout |
 | `OPENAI_CONFLICT_MAX_API_RETRIES` | `4` | Retry budget for transient errors |
-| `CONFLICT_OUTPUT_STEM` | `conflict_flags_openai` | Filename stem for CSV/JSON/checkpoint |
+| `CONFLICT_FORCE_PREPROCESS` | `false` | Re-extract PDF text even when a current `.txt` cache exists |
+| `CONFLICT_OUTPUT_STEM` | `conflict_flags_openai_<year>` | Filename stem for CSV/JSON/checkpoint |
+
+CLI flags `--year` and `--input-dir` mirror the input environment variables and take precedence over them.
 
 ## Tests
 
@@ -110,12 +119,12 @@ The Backend suite covers the Form 700 parser contract, the scraper helpers, and 
 ## Outputs
 
 - `Backend/src/web_scrapers/output_data/<year>/*.pdf` — downloaded filing packets
-- `Backend/conflict_flags_openai.csv` / `.json` — per-page conflict flags from the OpenAI matcher
-- `Backend/conflict_flags_openai_checkpoint.json` — resumable run state
+- `Backend/conflict_flags_openai_<year>.csv` / `.json` — per-page conflict flags from the OpenAI matcher
+- `Backend/conflict_flags_openai_<year>_checkpoint.json` — resumable run state
 
 ## Notes
 
 - All three matchers (`higherSpec.py`, `higherSpec_chatollama.py`, `higherSpec_openai.py`) share Form 700 path resolution via `Backend/src/llmFlagging/form700_paths.py`. Set `FORM700_XLSX_PATH` to point them at a different workbook.
 - The parser's `normalize_shf()` is silent by default; pass `verbose=True` for the per-sheet log lines.
 - The OpenAI matcher gracefully continues if the Form 700 workbook is missing; the others raise.
-Tidy 
+Tidy

@@ -25,15 +25,19 @@ python3 -m unittest discover tests
 python3 src/700Parse/seven.py
 
 # OpenAI matcher (dry run)
-OPENAI_API_KEY=sk-... OPENAI_CONFLICT_SAMPLE_LIMIT=5 \
+OPENAI_API_KEY=sk-... CONFLICT_INPUT_YEAR=2019 OPENAI_CONFLICT_SAMPLE_LIMIT=5 \
     python3 src/llmFlagging/higherSpec_openai.py
+python3 src/llmFlagging/higherSpec_openai.py --year 2019
+python3 src/llmFlagging/higherSpec_openai.py --input-dir src/web_scrapers/output_data/2019
 ```
 
 ## Outputs
 
-- `conflict_flags_openai.csv` / `.json` — per-page conflict flags
-- `conflict_flags_openai_checkpoint.json` — resumable run state
+- `conflict_flags_openai_<year>.csv` / `.json` — per-page conflict flags
+- `conflict_flags_openai_<year>_checkpoint.json` — resumable run state
 - `src/web_scrapers/output_data/<year>/*.pdf` — downloaded packets
+
+`higherSpec_openai.py` defaults to `src/web_scrapers/output_data/2019`; `--year` / `CONFLICT_INPUT_YEAR` select a different year folder, and `--input-dir` / `CONFLICT_INPUT_DIR` select a custom folder. CLI flags take precedence over env vars. Custom input folders use `conflict_flags_openai_<input-dir-name>` as the default output stem unless output path env vars override it.
 
 ## Notes on `preprocess.py`
 
