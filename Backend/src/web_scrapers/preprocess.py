@@ -43,21 +43,22 @@ def cleanup(output_dir=None, *, force=False, progress=None):
                 continue
 
             progress(f"Extracting PDF text {index}/{len(files)}: {file}")
+            page_texts = []
             try:
-                doc = pymupdf.open(file_path)
+                with pymupdf.open(file_path) as doc:
+                    for page_num, page in enumerate(doc):
+                        page_raw_text = page.get_text()
+                        page_text = page_raw_text.strip()
+                        if page_text:
+                            pages_for_later.append({
+                                'file': file,
+                                'page': page_num + 1,
+                                'text': page_text
+                            })
+                        page_texts.append(page_raw_text)
             except Exception as e:
                 print(f"Failed to open PDF {file}: {e}")
                 continue
-            page_texts = []
-            for page_num, page in enumerate(doc):
-                page_text = page.get_text().strip()
-                if page_text:
-                    pages_for_later.append({
-                        'file': file,
-                        'page': page_num + 1,
-                        'text': page_text
-                    })
-                page_texts.append(page.get_text())
             txt_path.write_text(chr(12).join(page_texts), encoding='utf-8')
 
         elif ext == '.csv':

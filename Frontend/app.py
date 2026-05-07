@@ -8,17 +8,33 @@ Coordinates:
 """
 
 import csv
+import html
+import queue
+import sys
 import threading
 from pathlib import Path
 from tkinter import filedialog, messagebox
+
+PROJECT_DIR = Path(__file__).resolve().parents[1]
+if str(PROJECT_DIR) not in sys.path:
+    sys.path.insert(0, str(PROJECT_DIR))
 
 import customtkinter as ctk
 
 from agents.browser_agent import BrowserAgent
 from core.data_loader import DataLoader, DEFAULT_PATH, BACKEND_DIR
+from shared.export_safety import neutralize_csv_row
 from core.filter_engine import FilterEngine
+from core.filter_tasks import compute_filter_task, compute_full_aggregates
 from ui.email_dialog import EmailDialog
 from ui.theme import COLORS, font, resolve_color
+
+
+def _escape_reportlab_markup(value) -> str:
+    """Escape dynamic text before it is passed to ReportLab Paragraph."""
+    if value is None:
+        return ""
+    return html.escape(str(value), quote=False)
 
 
 class ConflictDashboard:
@@ -36,6 +52,8 @@ class ConflictDashboard:
 
         self._json_files: dict[str, Path] = {}
         self._loaded_path: Path | None = None
+        self._load_generation = 0
+        self._filter_generation = 0
 
         self._configure_root()
         self._build_body()
@@ -480,6 +498,9 @@ class ConflictDashboard:
 
     def _load_data(self, path=None) -> None:
         load_path = Path(path) if path else DEFAULT_PATH
+        self._load_generation += 1
+        self._filter_generation += 1
+        load_generation = self._load_generation
         self._loaded_path = load_path
         self._load_status_lbl.configure(
             text=f"Loading {load_path.name}...",
@@ -487,11 +508,13 @@ class ConflictDashboard:
         )
 
         def _on_success(records, meta):
-            self._all_records = records
-            self._meta = meta
-            self.root.after(0, self._on_load_complete)
+            if load_generation != self._load_generation:
+                return
+            self._prepare_loaded_records(load_generation, records, meta)
 
         def _on_error(exc):
+            if load_generation != self._load_generation:
+                return
             self.root.after(0, lambda: messagebox.showerror("Load Error", str(exc)))
 
         self._loader.load(path=load_path, on_success=_on_success, on_error=_on_error)
@@ -502,7 +525,49 @@ class ConflictDashboard:
         if drain and not drain():
             self.root.after(100, self._poll_loader)
 
-    def _on_load_complete(self) -> None:
+    def _prepare_loaded_records(self, generation: int, records: list, meta: dict) -> None:
+        result_q: queue.Queue = queue.Queue(maxsize=1)
+
+        def _worker() -> None:
+            try:
+                result_q.put(("ok", compute_full_aggregates(records, self._engine)))
+            except Exception as exc:  # noqa: BLE001
+                result_q.put(("err", exc))
+
+        threading.Thread(target=_worker, daemon=True).start()
+        self.root.after(50, lambda: self._poll_load_prepare(generation, records, meta, result_q))
+
+    def _poll_load_prepare(
+        self,
+        generation: int,
+        records: list,
+        meta: dict,
+        result_q: queue.Queue,
+    ) -> None:
+        if generation != self._load_generation:
+            return
+
+        try:
+            item = result_q.get_nowait()
+        except queue.Empty:
+            self.root.after(50, lambda: self._poll_load_prepare(generation, records, meta, result_q))
+            return
+
+        kind = item[0]
+        if kind == "err":
+            _, exc = item
+            messagebox.showerror("Load Error", str(exc))
+            return
+
+        _, all_agg = item
+        self._on_load_complete(records, meta, all_agg)
+
+    def _on_load_complete(self, records: list, meta: dict, all_agg: dict) -> None:
+        self._all_records = records
+        self._meta = meta
+        self._all_agg = all_agg
+        self._filtered_records = []
+        self._filtered_agg = {}
         self._populate_filter_combos()
         self._apply_filters()
 
@@ -556,9 +621,44 @@ class ConflictDashboard:
 
     def _apply_filters(self) -> None:
         filters = self._build_filter_state()
-        self._filtered_records = self._engine.apply(self._all_records, filters)
-        self._all_agg = self._engine.compute_aggregates(self._all_records)
-        self._filtered_agg = self._engine.compute_aggregates(self._filtered_records)
+        records = self._all_records
+        all_agg = self._all_agg or None
+        self._filter_generation += 1
+        generation = self._filter_generation
+        result_q: queue.Queue = queue.Queue(maxsize=1)
+
+        def _worker() -> None:
+            try:
+                result_q.put(("ok", compute_filter_task(records, filters, all_agg, self._engine)))
+            except Exception as exc:  # noqa: BLE001
+                result_q.put(("err", exc))
+
+        threading.Thread(target=_worker, daemon=True).start()
+        self.root.after(50, lambda: self._poll_filter_result(generation, result_q))
+
+    def _poll_filter_result(self, generation: int, result_q: queue.Queue) -> None:
+        if generation != self._filter_generation:
+            return
+
+        try:
+            item = result_q.get_nowait()
+        except queue.Empty:
+            self.root.after(50, lambda: self._poll_filter_result(generation, result_q))
+            return
+
+        if generation != self._filter_generation:
+            return
+
+        kind = item[0]
+        if kind == "err":
+            _, exc = item
+            messagebox.showerror("Filter Error", str(exc))
+            return
+
+        _, result = item
+        self._filtered_records = result.filtered_records
+        self._filtered_agg = result.filtered_agg
+        self._all_agg = result.all_agg
         self._refresh_all()
 
     def _reset_filters(self) -> None:
@@ -614,7 +714,7 @@ class ConflictDashboard:
                         source = rec.get("source", {})
                         officials = self._record_officials(rec)
                         entities = self._record_entities(rec)
-                        writer.writerow({
+                        writer.writerow(neutralize_csv_row({
                             "id": rec.get("id", ""),
                             "confidence": conflict.get("confidence", ""),
                             "match": conflict.get("match", ""),
@@ -624,7 +724,7 @@ class ConflictDashboard:
                             "officials": "; ".join(officials),
                             "entities": "; ".join(entities),
                             "keywords": "; ".join(rec.get("keywords_matched", [])),
-                        })
+                        }))
                 self.root.after(0, lambda: messagebox.showinfo("Saved", f"CSV saved to:\n{path}"))
             except Exception as exc:  # noqa: BLE001
                 self.root.after(0, lambda: messagebox.showerror("Export Error", str(exc)))
@@ -712,11 +812,13 @@ class ConflictDashboard:
                 story.append(Paragraph("Sacramento County", title_style))
                 story.append(Paragraph("Conflict Signals Report", title_style))
                 story.append(Paragraph(
-                    f"Source: {loaded_name}  ·  "
-                    f"Showing {shown:,} of {total:,} records  ·  "
-                    f"High: {agg.get('by_confidence', {}).get('high', 0):,}  "
-                    f"Medium: {agg.get('by_confidence', {}).get('medium', 0):,}  "
-                    f"Low: {agg.get('by_confidence', {}).get('low', 0):,}",
+                    _escape_reportlab_markup(
+                        f"Source: {loaded_name}  ·  "
+                        f"Showing {shown:,} of {total:,} records  ·  "
+                        f"High: {agg.get('by_confidence', {}).get('high', 0):,}  "
+                        f"Medium: {agg.get('by_confidence', {}).get('medium', 0):,}  "
+                        f"Low: {agg.get('by_confidence', {}).get('low', 0):,}"
+                    ),
                     sub_style,
                 ))
 
@@ -736,12 +838,15 @@ class ConflictDashboard:
                     reasoning = conflict.get("reasoning", "")
                     reasoning = reasoning[:220] + "..." if len(reasoning) > 220 else reasoning
                     table_data.append([
-                        Paragraph(conflict.get("confidence", "").upper(), body_style),
-                        Paragraph(fname_short, body_style),
-                        str(source.get("page", "")),
-                        Paragraph("; ".join(officials) or "—", body_style),
-                        Paragraph("; ".join(entities) or "—", body_style),
-                        Paragraph(reasoning, body_style),
+                        Paragraph(
+                            _escape_reportlab_markup(conflict.get("confidence", "").upper()),
+                            body_style,
+                        ),
+                        Paragraph(_escape_reportlab_markup(fname_short), body_style),
+                        Paragraph(_escape_reportlab_markup(source.get("page", "")), body_style),
+                        Paragraph(_escape_reportlab_markup("; ".join(officials) or "—"), body_style),
+                        Paragraph(_escape_reportlab_markup("; ".join(entities) or "—"), body_style),
+                        Paragraph(_escape_reportlab_markup(reasoning), body_style),
                     ])
 
                 tbl = Table(table_data, colWidths=col_widths, repeatRows=1)
@@ -772,7 +877,9 @@ class ConflictDashboard:
                 if shown > 2000:
                     story.append(Spacer(1, 0.15 * inch))
                     story.append(Paragraph(
-                        f"Report capped at 2,000 rows. Full dataset: {shown:,} records. Use CSV export for complete data.",
+                        _escape_reportlab_markup(
+                            f"Report capped at 2,000 rows. Full dataset: {shown:,} records. Use CSV export for complete data."
+                        ),
                         sub_style,
                     ))
 

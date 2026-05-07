@@ -2,6 +2,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
@@ -50,6 +51,25 @@ class PreprocessContractTests(unittest.TestCase):
 
         self.assertEqual(pages, [{"file": "packet.pdf", "page": 1, "text": "cached page"}])
         self.assertTrue(any("Skipping current text extract" in event for event in events))
+
+    def test_cleanup_closes_pdf_and_reads_each_page_once(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            pdf = Path(tmp) / "packet.pdf"
+            pdf.write_bytes(b"pdf bytes")
+            page = MagicMock()
+            page.get_text.return_value = " page text \n"
+            doc = MagicMock()
+            doc.__enter__.return_value = [page]
+
+            with patch("src.web_scrapers.preprocess.pymupdf.open", return_value=doc) as open_pdf:
+                pages = cleanup(tmp)
+
+            open_pdf.assert_called_once_with(pdf)
+            doc.__enter__.assert_called_once_with()
+            doc.__exit__.assert_called_once()
+            page.get_text.assert_called_once_with()
+            self.assertEqual(pages, [{"file": "packet.pdf", "page": 1, "text": "page text"}])
+            self.assertEqual((Path(tmp) / "packet.pdf.txt").read_text(encoding="utf-8"), " page text \n")
 
 
 if __name__ == "__main__":

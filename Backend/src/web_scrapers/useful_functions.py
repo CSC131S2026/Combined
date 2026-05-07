@@ -2,10 +2,18 @@ from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 import time
 from datetime import date
+import pathlib
 from urllib.parse import urlparse, unquote
 import pandas as pd
 import os
 import shutil
+import sys
+
+PROJECT_DIR = pathlib.Path(__file__).resolve().parents[3]
+if str(PROJECT_DIR) not in sys.path:
+    sys.path.insert(0, str(PROJECT_DIR))
+
+from shared.export_safety import neutralize_dataframe_for_spreadsheet
 
 DOWNLOAD_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'output_data')
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
@@ -152,7 +160,7 @@ def save_files(file, file_type="pdf", driver=None, year=None):
 
     elif file_type == "csv":
         target_dir = _resolve_output_dir(year)
-        df = pd.DataFrame(file)
+        df = neutralize_dataframe_for_spreadsheet(pd.DataFrame(file))
         filepath = os.path.join(target_dir, f"{date.today().isoformat()}_Agenda.csv")
         df.to_csv(filepath, index=False)
         print(f"CSV saved to {filepath}")
@@ -160,7 +168,7 @@ def save_files(file, file_type="pdf", driver=None, year=None):
 
     elif file_type == "xlsx":
         target_dir = _resolve_output_dir(year)
-        df = pd.DataFrame(file)
+        df = neutralize_dataframe_for_spreadsheet(pd.DataFrame(file))
         filepath = os.path.join(target_dir, f"{date.today().isoformat()}_Agenda.xlsx")
         df.to_excel(filepath, index=False)
         print(f"Excel saved to {filepath}")

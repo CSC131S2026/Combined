@@ -75,6 +75,33 @@ class UsefulFunctionsContractTests(unittest.TestCase):
         self.assertEqual(driver.scripts[0][0], "window.open(arguments[0], '_blank');")
         self.assertEqual(driver.scripts[0][1], ("https://example.test/a'quoted.pdf",))
 
+    def test_save_files_neutralizes_formula_cells_in_csv_and_xlsx_exports(self):
+        rows = [
+            {
+                "title": "=HYPERLINK(\"https://example.test\")",
+                "notes": "  +SUM(1,1)",
+                "count": -3,
+            }
+        ]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            original_download_dir = useful_functions.DOWNLOAD_DIR
+            useful_functions.DOWNLOAD_DIR = str(tmp)
+            try:
+                csv_path = useful_functions.save_files(rows, file_type="csv")
+                xlsx_path = useful_functions.save_files(rows, file_type="xlsx")
+            finally:
+                useful_functions.DOWNLOAD_DIR = original_download_dir
+
+            csv_text = Path(csv_path).read_text(encoding="utf-8")
+            xlsx_df = useful_functions.pd.read_excel(xlsx_path, dtype=str)
+
+        self.assertIn("'=HYPERLINK", csv_text)
+        self.assertIn("'  +SUM", csv_text)
+        self.assertEqual(xlsx_df.loc[0, "title"], "'=HYPERLINK(\"https://example.test\")")
+        self.assertEqual(xlsx_df.loc[0, "notes"], "'  +SUM(1,1)")
+        self.assertEqual(xlsx_df.loc[0, "count"], "-3")
+
 
 if __name__ == "__main__":
     unittest.main()

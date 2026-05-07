@@ -9,6 +9,7 @@ Provides:
 import json
 import queue
 import threading
+from collections import OrderedDict
 from pathlib import Path
 
 # Resolve default paths relative to this file's location
@@ -24,9 +25,12 @@ DEFAULT_PATH = (
 class DataLoader:
     """Loads and caches conflict JSON data."""
 
+    MAX_CACHE_ENTRIES = 16
+
     def __init__(self):
-        self._cache: dict[str, list] = {}
+        self._cache: OrderedDict[str, tuple[tuple[int, int], list]] = OrderedDict()
         self._meta_cache: dict[str, dict] = {}
+        self._cache_lock = threading.RLock()
 
     # ------------------------------------------------------------------
     # Synchronous load
@@ -39,9 +43,14 @@ class DataLoader:
         """
         path = Path(path) if path else DEFAULT_PATH
         key  = str(path)
+        stat = path.stat()
+        signature = (stat.st_mtime_ns, stat.st_size)
 
-        if key in self._cache:
-            return self._cache[key], self._meta_cache.get(key, {})
+        with self._cache_lock:
+            cached = self._cache.get(key)
+            if cached and cached[0] == signature:
+                self._cache.move_to_end(key)
+                return cached[1], self._meta_cache.get(key, {})
 
         with open(path, "r", encoding="utf-8") as fh:
             data = json.load(fh)
@@ -52,8 +61,13 @@ class DataLoader:
         if isinstance(data, dict):
             meta["summary"] = data.get("summary", {})
 
-        self._cache[key]      = records
-        self._meta_cache[key] = meta
+        with self._cache_lock:
+            self._cache[key]      = (signature, records)
+            self._cache.move_to_end(key)
+            self._meta_cache[key] = meta
+            while len(self._cache) > self.MAX_CACHE_ENTRIES:
+                stale_key, _ = self._cache.popitem(last=False)
+                self._meta_cache.pop(stale_key, None)
         return records, meta
 
     # ------------------------------------------------------------------

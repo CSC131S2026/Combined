@@ -4,3 +4,4 @@ matplotlib>=3.7.0
 numpy>=1.24.0
 darkdetect>=0.8.0
 reportlab>=4.0.0
+keyring>=25.0.0
