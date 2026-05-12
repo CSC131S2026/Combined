@@ -16,8 +16,9 @@ from pathlib import Path
 from tkinter import filedialog, messagebox
 
 PROJECT_DIR = Path(__file__).resolve().parents[1]
-if str(PROJECT_DIR) not in sys.path:
-    sys.path.insert(0, str(PROJECT_DIR))
+if not getattr(sys, "frozen", False):
+    if str(PROJECT_DIR) not in sys.path:
+        sys.path.insert(0, str(PROJECT_DIR))
 
 import customtkinter as ctk
 

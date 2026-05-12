@@ -12,9 +12,15 @@ import threading
 from collections import OrderedDict
 from pathlib import Path
 
+from shared.resource_path import resource_path, is_frozen
+
 # Resolve default paths relative to this file's location
 FRONTEND_DIR = Path(__file__).parent.parent       # Frontend/
-BACKEND_DIR  = FRONTEND_DIR.parent / "Backend"
+if is_frozen():
+    BACKEND_DIR = resource_path("Backend")
+else:
+    BACKEND_DIR = FRONTEND_DIR.parent / "Backend"
+
 DEFAULT_PATH = (
     BACKEND_DIR / "conflict_flags_openai.json"
     if (BACKEND_DIR / "conflict_flags_openai.json").exists()
