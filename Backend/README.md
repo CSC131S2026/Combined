@@ -4,7 +4,7 @@ Scraping, parsing, and LLM-flagging pipeline. See the [root README](../README.md
 
 ## Layout
 
-- `src/700Parse/` — Form 700 XLSX → structured filer records (`seven.py::normalize_shf`). Canonical workbook: `sac700.xlsx`.
+- `src/form700_parse/` — Form 700 XLSX → structured filer records (`seven.py::normalize_shf`). Canonical workbook: `sac700.xlsx`.
 - `src/llmFlagging/` — conflict matchers:
   - `higherSpec.py` — base matcher
   - `higherSpec_chatollama.py` — local Ollama variant
@@ -22,7 +22,7 @@ Scraping, parsing, and LLM-flagging pipeline. See the [root README](../README.md
 python3 -m unittest discover tests
 
 # Parser smoke
-python3 src/700Parse/seven.py
+python3 src/form700_parse/seven.py
 
 # OpenAI matcher (dry run)
 OPENAI_API_KEY=sk-... CONFLICT_INPUT_YEAR=2019 OPENAI_CONFLICT_SAMPLE_LIMIT=5 \

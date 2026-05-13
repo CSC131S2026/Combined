@@ -8,7 +8,7 @@ End-to-end pipeline for surfacing potential conflicts of interest in Sacramento 
 .
 ├── Backend/
 │   ├── src/
-│   │   ├── 700Parse/           # Form 700 XLSX parser (sac700.xlsx is the canonical workbook)
+│   │   ├── form700_parse/      # Form 700 XLSX parser (sac700.xlsx is the canonical workbook)
 │   │   ├── llmFlagging/        # Conflict matchers — OpenAI, ChatOllama, and base implementations
 │   │   ├── web_scrapers/       # Selenium-based Sacramento County packet scraper + preprocess
 │   │   └── docuAgent/          # Document-writing agent helpers
@@ -60,7 +60,7 @@ python src/web_scrapers/scraper_sacramento_county.py
 
 ```bash
 cd Backend
-python src/700Parse/seven.py
+python src/form700_parse/seven.py
 ```
 
 ### Conflict matching — OpenAI
@@ -89,7 +89,7 @@ python src/llmFlagging/higherSpec_chatollama.py
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `FORM700_XLSX_PATH` | `Backend/src/700Parse/sac700.xlsx` | Override the Form 700 workbook used by all matchers |
+| `FORM700_XLSX_PATH` | `Backend/src/form700_parse/sac700.xlsx` | Override the Form 700 workbook used by all matchers |
 | `OPENAI_API_KEY` | — | Required for the OpenAI matcher |
 | `OPENAI_CONFLICT_MODEL` | `gpt-5.4-mini` | Model used by the OpenAI matcher |
 | `CONFLICT_INPUT_YEAR` | `2019` | Year folder under `Backend/src/web_scrapers/output_data/<year>` used by the OpenAI matcher |

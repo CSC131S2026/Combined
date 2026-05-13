@@ -1,7 +1,7 @@
 """
 Prototype: higherSpec.py migrated to OpenAI Responses + Pydantic structured output.
 """
-import sys, importlib.util, pathlib, re, os, random, argparse
+import sys, pathlib, re, os, random, argparse
 
 _repo_root = pathlib.Path(__file__).parents[2]
 if str(_repo_root) not in sys.path:
@@ -17,10 +17,7 @@ from typing import Literal
 from shared.export_safety import neutralize_dataframe_for_spreadsheet
 from src.web_scrapers.preprocess import cleanup, read_texts
 from src.llmFlagging.form700_paths import resolve_form700_path
-
-_spec = importlib.util.spec_from_file_location("seven", _repo_root / "src" / "700Parse" / "seven.py")
-_mod = importlib.util.module_from_spec(_spec); _spec.loader.exec_module(_mod)
-normalize_shf = _mod.normalize_shf
+from src.form700_parse.seven import normalize_shf
 
 import json
 import uuid

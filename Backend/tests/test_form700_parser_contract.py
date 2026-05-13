@@ -8,8 +8,8 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-SEVEN_PATH = BACKEND_DIR / "src" / "700Parse" / "seven.py"
-SAC700_PATH = BACKEND_DIR / "src" / "700Parse" / "sac700.xlsx"
+SEVEN_PATH = BACKEND_DIR / "src" / "form700_parse" / "seven.py"
+SAC700_PATH = BACKEND_DIR / "src" / "form700_parse" / "sac700.xlsx"
 
 _spec = importlib.util.spec_from_file_location("seven", SEVEN_PATH)
 seven = importlib.util.module_from_spec(_spec)
