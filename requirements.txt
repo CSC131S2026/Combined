@@ -1,0 +1,30 @@
+# Combined runtime + build dependencies for the Conflict-of-Interest Dashboard.
+# Use this file to install everything needed to run the Frontend app (including
+# the in-process Pipeline tab that imports Backend modules) and to build the
+# packaged .app / .exe via ConflictChecker.spec.
+#
+# For folder-scoped installs, see Backend/requirements.txt and
+# Frontend/requirements.txt instead.
+
+# --- Frontend (GUI) ---
+customtkinter>=5.2.0
+darkdetect>=0.8.0
+Pillow>=10.0.0
+reportlab>=4.0.0
+
+# --- Backend (pipeline / scraping / LLM) ---
+langchain>=0.2.0
+langchain-ollama>=0.1.0
+ollama>=0.3.0
+openai>=1.60.0
+openpyxl>=3.1.0
+pandas>=2.0.0
+pydantic>=2.0.0
+pymupdf>=1.24.0
+rich>=13.0.0
+selenium>=4.20.0
+tiktoken>=0.7.0
+tqdm>=4.66.0
+
+# --- Packaging (only needed to build the .app / .exe) ---
+pyinstaller>=6.0.0

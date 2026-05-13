@@ -1,0 +1,36 @@
+# Intentionally metadata-only.
+#
+# This project is NOT pip-installable as-is. The repo has a split
+# Frontend/ + Backend/ layout, and Backend/src/ is an actual Python
+# package literally named "src" (not the conventional packaging-only
+# `src/` directory). Making this a normal installable distribution
+# would require renaming `Backend/src/` and reworking imports across
+# both halves of the codebase, which is out of scope for this file.
+#
+# Runtime deps live in the three requirements.txt files:
+#   - requirements.txt           (union + pyinstaller, root)
+#   - Frontend/requirements.txt
+#   - Backend/requirements.txt
+#
+# This pyproject.toml exists so linters, editors, GitHub language
+# detection, and other tooling can recognize the project root and
+# its Python version floor.
+
+[project]
+name = "conflict-checker"
+version = "0.1.0"
+description = "Sacramento County Form 700 conflict-of-interest dashboard and analysis pipeline."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+authors = [{ name = "Braylon Parker" }]
+
+[project.urls]
+Repository = "local"
+
+[tool.conflictchecker]
+# Real dependencies live in requirements.txt files (Frontend/, Backend/, root).
+# This block is a marker so future tooling can find the project root.
+frontend_entry = "Frontend/main.py"
+backend_pipeline_entry = "Backend/src/llmFlagging/higherSpec_openai.py"
+pyinstaller_spec = "ConflictChecker.spec"
