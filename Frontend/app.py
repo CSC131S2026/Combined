@@ -23,6 +23,7 @@ if not getattr(sys, "frozen", False):
 import customtkinter as ctk
 
 from agents.browser_agent import BrowserAgent
+from agents.pipeline_agent import PipelineAgent
 from core.data_loader import DataLoader, DEFAULT_PATH, BACKEND_DIR
 from shared.export_safety import neutralize_csv_row
 from core.filter_engine import FilterEngine
@@ -100,14 +101,39 @@ class ConflictDashboard:
     # ------------------------------------------------------------------
 
     def _build_body(self) -> None:
-        body = ctk.CTkFrame(self.root, fg_color="transparent")
-        body.grid(row=0, column=0, padx=16, pady=16, sticky="nsew")
-        body.grid_rowconfigure(0, weight=1)
-        body.grid_columnconfigure(0, weight=0)
-        body.grid_columnconfigure(1, weight=1)
+        tabs = ctk.CTkTabview(
+            self.root,
+            fg_color=COLORS["bg_secondary"],
+            segmented_button_fg_color=COLORS["bg_card"],
+            segmented_button_selected_color=COLORS["accent_purple"],
+            segmented_button_selected_hover_color=COLORS["accent_violet"],
+            segmented_button_unselected_color=COLORS["bg_elevated"],
+            segmented_button_unselected_hover_color=COLORS["shadow"],
+            text_color=COLORS["text_inverse"],
+            corner_radius=18,
+            border_width=1,
+            border_color=COLORS["border"],
+        )
+        tabs.grid(row=0, column=0, padx=16, pady=16, sticky="nsew")
+        tabs.add("Dashboard")
+        tabs.add("Pipeline")
+        self._tabs = tabs
 
-        self._build_sidebar(body)
-        self._build_content(body)
+        dashboard = tabs.tab("Dashboard")
+        dashboard.grid_rowconfigure(0, weight=1)
+        dashboard.grid_columnconfigure(0, weight=0)
+        dashboard.grid_columnconfigure(1, weight=1)
+
+        self._build_sidebar(dashboard)
+        self._build_content(dashboard)
+
+        pipeline_tab = tabs.tab("Pipeline")
+        pipeline_tab.grid_rowconfigure(0, weight=1)
+        pipeline_tab.grid_columnconfigure(0, weight=1)
+        self._pipeline_agent = PipelineAgent(
+            pipeline_tab,
+            on_results_ready=self._on_pipeline_results_ready,
+        )
 
     # ------------------------------------------------------------------
     # Sidebar
@@ -146,6 +172,7 @@ class ConflictDashboard:
         file_row = ctk.CTkFrame(scroll, fg_color="transparent")
         file_row.pack(fill="x", padx=16, pady=(4, 4))
         file_row.grid_columnconfigure(0, weight=1)
+        file_row.grid_columnconfigure(1, weight=1)
 
         self._file_var = ctk.StringVar(value="Scanning...")
         self._file_cb = ctk.CTkComboBox(
@@ -165,7 +192,19 @@ class ConflictDashboard:
             corner_radius=14,
             command=self._on_file_selected,
         )
-        self._file_cb.grid(row=0, column=0, sticky="ew", padx=(0, 6))
+        self._file_cb.grid(row=0, column=0, columnspan=2, sticky="ew", padx=(0, 0), pady=(0, 4))
+
+        ctk.CTkButton(
+            file_row,
+            text="Browse...",
+            font=font("label_bold"),
+            fg_color=COLORS["accent_green"],
+            hover_color=COLORS["accent_emerald"],
+            text_color=COLORS["text_inverse"],
+            height=32,
+            corner_radius=12,
+            command=self._browse_json_file,
+        ).grid(row=1, column=0, sticky="ew", padx=(0, 4))
 
         ctk.CTkButton(
             file_row,
@@ -174,11 +213,10 @@ class ConflictDashboard:
             fg_color=COLORS["bg_elevated"],
             hover_color=COLORS["shadow"],
             text_color=COLORS["text_primary"],
-            width=72,
-            height=36,
-            corner_radius=14,
+            height=32,
+            corner_radius=12,
             command=self._refresh_json_dropdown,
-        ).grid(row=0, column=1)
+        ).grid(row=1, column=1, sticky="ew", padx=(4, 0))
 
         self._load_status_lbl = ctk.CTkLabel(
             scroll,
@@ -496,6 +534,33 @@ class ConflictDashboard:
         path = self._json_files.get(selection)
         if path:
             self._load_data(path)
+
+    def _browse_json_file(self) -> None:
+        chosen = filedialog.askopenfilename(
+            title="Select conflict-flags JSON to display",
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+        )
+        if not chosen:
+            return
+        self._load_external_json(Path(chosen))
+
+    def _load_external_json(self, path: Path) -> None:
+        path = Path(path)
+        if not path.exists():
+            messagebox.showerror("Load Error", f"File not found:\n{path}")
+            return
+        self._json_files[path.name] = path
+        names = list(self._json_files.keys())
+        self._file_cb.configure(values=names)
+        self._file_var.set(path.name)
+        self._load_data(path)
+
+    def _on_pipeline_results_ready(self, path: Path) -> None:
+        try:
+            self._tabs.set("Dashboard")
+        except Exception:  # noqa: BLE001
+            pass
+        self._load_external_json(path)
 
     def _load_data(self, path=None) -> None:
         load_path = Path(path) if path else DEFAULT_PATH
