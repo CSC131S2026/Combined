@@ -105,7 +105,11 @@ hiddenimports += [
     "src.llmFlagging.higherSpec_openai",
     "src.llmFlagging.form700_paths",
     "src.web_scrapers",
+    "src.web_scrapers.county_registry",
     "src.web_scrapers.preprocess",
+    "src.web_scrapers.scraper_sacramento_county",
+    "src.web_scrapers.scraper_sonoma_county",
+    "src.web_scrapers.useful_functions",
     # pymupdf's public import name
     "fitz",
     # openpyxl write-only optimization path

@@ -47,13 +47,18 @@ cd Frontend
 python main.py
 ```
 
-### Scrape Sacramento County packets
+The Pipeline tab can optionally scrape a selected county before analysis and
+can use a county-specific Form 700 `.xlsx` workbook selected from disk. If no
+workbook is selected, it falls back to `Backend/src/form700_parse/sac700.xlsx`.
 
-Downloads filings into year-scoped folders under `Backend/src/web_scrapers/output_data/<year>/`. Already-downloaded packets are skipped on rerun, and stale `.crdownload` partials are cleaned up at startup.
+### Scrape county packets
+
+Downloads filings into year-scoped folders under `Backend/src/web_scrapers/output_data/<year>/` for Sacramento and `Backend/src/web_scrapers/output_data/sonoma/<year>/` for Sonoma. Already-downloaded packets are skipped on rerun, and stale `.crdownload` partials are cleaned up at startup.
 
 ```bash
 cd Backend
 python src/web_scrapers/scraper_sacramento_county.py
+python src/web_scrapers/scraper_sonoma_county.py
 ```
 
 ### Parse Form 700 disclosures (smoke run)
@@ -100,6 +105,7 @@ python src/llmFlagging/higherSpec_chatollama.py
 | `OPENAI_CONFLICT_MODEL` | `gpt-5.4-mini` | Model used by the OpenAI matcher |
 | `CONFLICT_INPUT_YEAR` | `2019` | Year folder under `Backend/src/web_scrapers/output_data/<year>` used by the OpenAI matcher |
 | `CONFLICT_INPUT_DIR` | — | Override the OpenAI matcher input directory; takes precedence over `CONFLICT_INPUT_YEAR` |
+| `CONFLICT_SCRAPER_OUTPUT_DIR` | `Backend/src/web_scrapers/output_data` | Override where county scrapers download packet PDFs |
 | `OPENAI_CONFLICT_SAMPLE_LIMIT` | `0` (no cap) | Cap pages processed — handy for dry runs |
 | `OPENAI_CONFLICT_CONCURRENCY` | `16` | Parallel API requests |
 | `OPENAI_CONFLICT_MAX_OUTPUT_TOKENS` | `200` | Per-response token cap |
@@ -127,7 +133,8 @@ The Backend suite covers the Form 700 parser contract, the scraper helpers, and 
 
 ## Outputs
 
-- `Backend/src/web_scrapers/output_data/<year>/*.pdf` — downloaded filing packets
+- `Backend/src/web_scrapers/output_data/<year>/*.pdf` — downloaded Sacramento filing packets
+- `Backend/src/web_scrapers/output_data/sonoma/<year>/*.pdf` — downloaded Sonoma filing packets
 - `Backend/conflict_checker.sqlite3` — durable OpenAI matcher run metadata, page text, and analysis results
 - `Backend/conflict_flags_openai_<year>.csv` / `.json` — compatibility exports consumed by the dashboard
 - `Backend/conflict_flags_openai_<year>_failed_pages.csv` — written only when pages fail analysis

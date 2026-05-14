@@ -3,7 +3,7 @@ from selenium.webdriver.chrome.options import Options
 import time
 from datetime import date
 import pathlib
-from urllib.parse import urlparse, unquote
+from urllib.parse import parse_qs, urlparse, unquote
 import pandas as pd
 import os
 import shutil
@@ -19,8 +19,16 @@ DOWNLOAD_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'output_
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
 
+def _download_dir():
+    override = os.getenv("CONFLICT_SCRAPER_OUTPUT_DIR", "").strip()
+    download_dir = override or DOWNLOAD_DIR
+    download_dir = os.path.abspath(os.path.expanduser(download_dir))
+    os.makedirs(download_dir, exist_ok=True)
+    return download_dir
+
+
 def _resolve_output_dir(year=None):
-    base = DOWNLOAD_DIR
+    base = _download_dir()
     if year is None:
         return base
     bucket = str(year) if str(year).strip() else "unknown"
@@ -32,18 +40,41 @@ def _resolve_output_dir(year=None):
 def _expected_filename_from_url(url):
     if not url:
         return None
+    generated_name = _generated_filename_from_url(url)
+    if generated_name:
+        return generated_name
     path = urlparse(url).path
     name = unquote(os.path.basename(path))
     return name or None
 
 
+def _generated_filename_from_url(url):
+    parsed = urlparse(url)
+    name = unquote(os.path.basename(parsed.path or ""))
+    if name.lower() != "view.ashx":
+        return None
+
+    query = parse_qs(parsed.query)
+    doc_id = (query.get("ID") or [""])[0].strip()
+    if not doc_id:
+        return None
+    mode = (query.get("M") or [""])[0].strip().upper()
+    label = {
+        "A": "agenda",
+        "M": "minutes",
+        "P": "packet",
+    }.get(mode, "document")
+    return f"legistar_{label}_{doc_id}.pdf"
+
+
 def cleanup_stale_partials(download_dir=None):
     targets = []
     if download_dir is None:
-        targets.append(DOWNLOAD_DIR)
-        if os.path.isdir(DOWNLOAD_DIR):
-            for entry in os.listdir(DOWNLOAD_DIR):
-                full = os.path.join(DOWNLOAD_DIR, entry)
+        base_dir = _download_dir()
+        targets.append(base_dir)
+        if os.path.isdir(base_dir):
+            for entry in os.listdir(base_dir):
+                full = os.path.join(base_dir, entry)
                 if os.path.isdir(full):
                     targets.append(full)
     else:
@@ -64,9 +95,10 @@ def cleanup_stale_partials(download_dir=None):
 
 
 def get_chrome_driver():
+    download_dir = _download_dir()
     chrome_options = Options()
     prefs = {
-        "download.default_directory": DOWNLOAD_DIR,
+        "download.default_directory": download_dir,
         "download.prompt_for_download": False,
         "download.directory_upgrade": True,
         "plugins.always_open_pdf_externally": True,
@@ -75,7 +107,8 @@ def get_chrome_driver():
     return webdriver.Chrome(options=chrome_options)
 
 
-def wait_for_download(timeout=40, before=None, download_dir=DOWNLOAD_DIR):
+def wait_for_download(timeout=40, before=None, download_dir=None):
+    download_dir = download_dir or _download_dir()
     before = set(os.listdir(download_dir)) if before is None else set(before)
     end_time = time.time() + timeout
     while time.time() < end_time:
@@ -97,6 +130,7 @@ def save_files(file, file_type="pdf", driver=None, year=None):
             return None
 
         target_dir = _resolve_output_dir(year)
+        staging_dir = _download_dir()
         expected_name = _expected_filename_from_url(file)
         if expected_name:
             existing = os.path.join(target_dir, expected_name)
@@ -104,9 +138,9 @@ def save_files(file, file_type="pdf", driver=None, year=None):
                 print(f"Skipping {expected_name}: already present in {target_dir}")
                 return existing
 
-        # Chrome's download dir is fixed per-session, so download into DOWNLOAD_DIR
-        # then relocate to the year-scoped bucket once the file is complete.
-        before = set(os.listdir(DOWNLOAD_DIR))
+        # Chrome's download dir is fixed per-session, so download into the
+        # staging folder then relocate to the year-scoped bucket once complete.
+        before = set(os.listdir(staging_dir))
         original_window = driver.current_window_handle
         download_window = None
 
@@ -119,7 +153,7 @@ def save_files(file, file_type="pdf", driver=None, year=None):
                 driver.switch_to.window(download_window)
             time.sleep(1)
 
-            completed = wait_for_download(before=before, download_dir=DOWNLOAD_DIR)
+            completed = wait_for_download(before=before, download_dir=staging_dir)
         finally:
             try:
                 if download_window and download_window in driver.window_handles:
@@ -133,16 +167,17 @@ def save_files(file, file_type="pdf", driver=None, year=None):
             print(f"Warning: Download timed out for {file}")
             return None
 
-        after = set(os.listdir(DOWNLOAD_DIR))
+        after = set(os.listdir(staging_dir))
         new_files = [name for name in after - before if not name.endswith(".crdownload")]
         if new_files:
             downloaded = max(
                 new_files,
-                key=lambda name: os.path.getmtime(os.path.join(DOWNLOAD_DIR, name)),
+                key=lambda name: os.path.getmtime(os.path.join(staging_dir, name)),
             )
-            source_path = os.path.join(DOWNLOAD_DIR, downloaded)
-            if target_dir != DOWNLOAD_DIR:
-                final_path = os.path.join(target_dir, downloaded)
+            source_path = os.path.join(staging_dir, downloaded)
+            final_name = _generated_filename_from_url(file) or downloaded
+            final_path = os.path.join(target_dir, final_name)
+            if os.path.abspath(source_path) != os.path.abspath(final_path):
                 if os.path.exists(final_path):
                     try:
                         os.remove(source_path)

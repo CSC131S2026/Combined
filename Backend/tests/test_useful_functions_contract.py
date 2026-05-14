@@ -1,3 +1,4 @@
+import os
 import sys
 import tempfile
 import unittest
@@ -101,6 +102,36 @@ class UsefulFunctionsContractTests(unittest.TestCase):
         self.assertEqual(xlsx_df.loc[0, "title"], "'=HYPERLINK(\"https://example.test\")")
         self.assertEqual(xlsx_df.loc[0, "notes"], "'  +SUM(1,1)")
         self.assertEqual(xlsx_df.loc[0, "count"], "-3")
+
+    def test_scraper_output_env_overrides_default_download_dir(self):
+        rows = [{"title": "Packet"}]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"CONFLICT_SCRAPER_OUTPUT_DIR": tmp}):
+                csv_path = useful_functions.save_files(rows, file_type="csv", year=2026)
+                csv_path = Path(csv_path).resolve()
+                self.assertEqual(csv_path.parent, Path(tmp).resolve() / "2026")
+                self.assertTrue(csv_path.exists())
+
+    def test_legistar_view_urls_get_stable_pdf_names(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            driver = FakeDriver(tmp)
+            original_download_dir = useful_functions.DOWNLOAD_DIR
+            useful_functions.DOWNLOAD_DIR = str(tmp)
+            try:
+                with patch.object(useful_functions.time, "sleep", return_value=None):
+                    path = useful_functions.save_files(
+                        "https://sonoma-county.legistar.com/View.ashx?ID=123&M=A",
+                        driver=driver,
+                        year=2026,
+                    )
+            finally:
+                useful_functions.DOWNLOAD_DIR = original_download_dir
+
+            saved_path = Path(path).resolve()
+            self.assertEqual(saved_path.name, "legistar_agenda_123.pdf")
+            self.assertEqual(saved_path.parent, Path(tmp).resolve() / "2026")
+            self.assertTrue(saved_path.exists())
 
 
 if __name__ == "__main__":

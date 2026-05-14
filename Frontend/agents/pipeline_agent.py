@@ -1,9 +1,9 @@
 """
 PipelineAgent — UI for running the Backend conflict-flagging pipeline.
 
-Exposes inputs for the OpenAI API key, year / input directory, optional sample
-limit, and a "Run" button (paired with a "Cancel" button). Streams log output
-into a scrolling textbox, shows a real progress bar driven by
+Exposes inputs for the OpenAI API key, county scraper, Form 700 workbook,
+year / input directory, optional sample limit, and a "Run" button (paired with
+a "Cancel" button). Streams log output into a scrolling textbox, shows a real progress bar driven by
 :meth:`PipelineRunner.on_progress`, and — on success — offers to load the
 produced JSON into the Dashboard.
 
@@ -46,6 +46,9 @@ class PipelineAgent:
         self._on_results_ready = on_results_ready
 
         self._runner = PipelineRunner()
+        self._county_options = self._runner.supported_counties()
+        self._county_label_to_key = {label: key for key, label in self._county_options}
+        self._county_labels = [label for _key, label in self._county_options]
         # Single typed event queue: ('log', str) | ('progress', int, int, str|None) | ('done', bool, str|None, str|None)
         self._events: queue.Queue[tuple] = queue.Queue()
         self._last_output_path: Path | None = None
@@ -125,10 +128,48 @@ class PipelineAgent:
             row=3, column=1, columnspan=3, sticky="w", padx=(0, 16), pady=(0, 4)
         )
 
+        # County + scrape row
+        ctk.CTkLabel(
+            controls, text="County", font=font("label"), text_color=COLORS["text_muted"]
+        ).grid(row=4, column=0, sticky="w", padx=(16, 8), pady=(8, 2))
+
+        self._county_var = ctk.StringVar(value=self._county_labels[0] if self._county_labels else "Sacramento County")
+        self._county_cb = ctk.CTkComboBox(
+            controls,
+            variable=self._county_var,
+            values=self._county_labels or ["Sacramento County"],
+            font=font("body_small"),
+            fg_color=COLORS["bg_secondary"],
+            border_color=COLORS["border"],
+            button_color=COLORS["bg_elevated"],
+            button_hover_color=COLORS["shadow"],
+            dropdown_fg_color=COLORS["bg_card"],
+            dropdown_text_color=COLORS["text_primary"],
+            dropdown_hover_color=COLORS["highlight_soft"],
+            text_color=COLORS["text_primary"],
+            height=34,
+            corner_radius=12,
+        )
+        self._county_cb.grid(row=4, column=1, sticky="ew", padx=(0, 16), pady=(8, 2))
+
+        self._scrape_var = ctk.BooleanVar(value=False)
+        ctk.CTkSwitch(
+            controls,
+            text="Scrape before analysis",
+            variable=self._scrape_var,
+            font=font("body_small"),
+            text_color=COLORS["text_primary"],
+            button_color=COLORS["accent_green"],
+            button_hover_color=COLORS["accent_emerald"],
+            progress_color=COLORS["accent_green"],
+            onvalue=True,
+            offvalue=False,
+        ).grid(row=4, column=2, columnspan=2, sticky="w", padx=(0, 16), pady=(8, 2))
+
         # Year + model row
         ctk.CTkLabel(
             controls, text="Year", font=font("label"), text_color=COLORS["text_muted"]
-        ).grid(row=4, column=0, sticky="w", padx=(16, 8), pady=(8, 2))
+        ).grid(row=5, column=0, sticky="w", padx=(16, 8), pady=(8, 2))
 
         self._year_var = ctk.StringVar(value="2019")
         ctk.CTkEntry(
@@ -140,11 +181,11 @@ class PipelineAgent:
             height=34,
             corner_radius=12,
             width=120,
-        ).grid(row=4, column=1, sticky="w", padx=(0, 16), pady=(8, 2))
+        ).grid(row=5, column=1, sticky="w", padx=(0, 16), pady=(8, 2))
 
         ctk.CTkLabel(
             controls, text="Model", font=font("label"), text_color=COLORS["text_muted"]
-        ).grid(row=4, column=2, sticky="w", padx=(0, 8), pady=(8, 2))
+        ).grid(row=5, column=2, sticky="w", padx=(0, 8), pady=(8, 2))
 
         self._model_var = ctk.StringVar(value=os.environ.get("OPENAI_CONFLICT_MODEL", "gpt-5.4-mini"))
         ctk.CTkEntry(
@@ -155,12 +196,41 @@ class PipelineAgent:
             text_color=COLORS["text_primary"],
             height=34,
             corner_radius=12,
-        ).grid(row=4, column=3, sticky="ew", padx=(0, 16), pady=(8, 2))
+        ).grid(row=5, column=3, sticky="ew", padx=(0, 16), pady=(8, 2))
+
+        # Form 700 workbook row
+        ctk.CTkLabel(
+            controls, text="Form 700 XLSX", font=font("label"), text_color=COLORS["text_muted"]
+        ).grid(row=6, column=0, sticky="w", padx=(16, 8), pady=(8, 2))
+
+        self._form700_var = ctk.StringVar(value="")
+        ctk.CTkEntry(
+            controls,
+            textvariable=self._form700_var,
+            placeholder_text="Defaults to Backend/src/form700_parse/sac700.xlsx",
+            fg_color=COLORS["bg_secondary"],
+            border_color=COLORS["border"],
+            text_color=COLORS["text_primary"],
+            height=34,
+            corner_radius=12,
+        ).grid(row=6, column=1, columnspan=2, sticky="ew", padx=(0, 8), pady=(8, 2))
+
+        ctk.CTkButton(
+            controls,
+            text="Browse...",
+            font=font("label_bold"),
+            fg_color=COLORS["bg_elevated"],
+            hover_color=COLORS["shadow"],
+            text_color=COLORS["text_primary"],
+            height=34,
+            corner_radius=12,
+            command=self._browse_form700,
+        ).grid(row=6, column=3, sticky="ew", padx=(0, 16), pady=(8, 2))
 
         # Input dir override row
         ctk.CTkLabel(
             controls, text="Input dir (optional)", font=font("label"), text_color=COLORS["text_muted"]
-        ).grid(row=5, column=0, sticky="w", padx=(16, 8), pady=(8, 2))
+        ).grid(row=7, column=0, sticky="w", padx=(16, 8), pady=(8, 2))
 
         self._input_dir_var = ctk.StringVar(value="")
         ctk.CTkEntry(
@@ -172,7 +242,7 @@ class PipelineAgent:
             text_color=COLORS["text_primary"],
             height=34,
             corner_radius=12,
-        ).grid(row=5, column=1, columnspan=2, sticky="ew", padx=(0, 8), pady=(8, 2))
+        ).grid(row=7, column=1, columnspan=2, sticky="ew", padx=(0, 8), pady=(8, 2))
 
         ctk.CTkButton(
             controls,
@@ -184,12 +254,12 @@ class PipelineAgent:
             height=34,
             corner_radius=12,
             command=self._browse_input_dir,
-        ).grid(row=5, column=3, sticky="ew", padx=(0, 16), pady=(8, 2))
+        ).grid(row=7, column=3, sticky="ew", padx=(0, 16), pady=(8, 2))
 
         # Sample limit row + buttons
         ctk.CTkLabel(
             controls, text="Sample limit", font=font("label"), text_color=COLORS["text_muted"]
-        ).grid(row=6, column=0, sticky="w", padx=(16, 8), pady=(8, 14))
+        ).grid(row=8, column=0, sticky="w", padx=(16, 8), pady=(8, 14))
 
         self._sample_var = ctk.StringVar(value="0")
         ctk.CTkEntry(
@@ -201,17 +271,17 @@ class PipelineAgent:
             height=34,
             corner_radius=12,
             width=120,
-        ).grid(row=6, column=1, sticky="w", padx=(0, 16), pady=(8, 14))
+        ).grid(row=8, column=1, sticky="w", padx=(0, 16), pady=(8, 14))
 
         ctk.CTkLabel(
             controls,
             text="0 = no cap",
             font=font("body_small"),
             text_color=COLORS["text_muted"],
-        ).grid(row=6, column=2, sticky="w", padx=(0, 16), pady=(8, 14))
+        ).grid(row=8, column=2, sticky="w", padx=(0, 16), pady=(8, 14))
 
         button_row = ctk.CTkFrame(controls, fg_color="transparent")
-        button_row.grid(row=6, column=3, sticky="e", padx=(0, 16), pady=(8, 14))
+        button_row.grid(row=8, column=3, sticky="e", padx=(0, 16), pady=(8, 14))
 
         self._cancel_btn = ctk.CTkButton(
             button_row,
@@ -348,6 +418,21 @@ class PipelineAgent:
         if chosen:
             self._input_dir_var.set(chosen)
 
+    def _browse_form700(self) -> None:
+        chosen = filedialog.askopenfilename(
+            title="Select Form 700 workbook",
+            filetypes=[
+                ("Excel workbooks", "*.xlsx"),
+                ("All files", "*.*"),
+            ],
+        )
+        if chosen:
+            self._form700_var.set(chosen)
+
+    def _selected_county_key(self) -> str:
+        label = self._county_var.get().strip()
+        return self._county_label_to_key.get(label, label or "sacramento")
+
     def _clear_log(self) -> None:
         self._log_widget.configure(state="normal")
         self._log_widget.delete("1.0", "end")
@@ -384,11 +469,31 @@ class PipelineAgent:
         input_dir = input_dir_raw or None
         year = self._year_var.get().strip() or None
         model = self._model_var.get().strip() or None
+        county_key = self._selected_county_key()
+        scrape_before_analysis = bool(self._scrape_var.get())
+        form700_raw = self._form700_var.get().strip()
+        form700_path = form700_raw or None
+
+        if form700_path:
+            form700_file = Path(form700_path).expanduser()
+            if not form700_file.exists():
+                self._append_log(f"[error] Form 700 workbook not found: {form700_file}\n")
+                return
+            if form700_file.suffix.lower() != ".xlsx":
+                self._append_log("[error] Form 700 upload must be an .xlsx workbook.\n")
+                return
+
+        if scrape_before_analysis and input_dir_raw:
+            messagebox.showwarning(
+                "Choose scrape or input dir",
+                "Clear Input dir before scraping a county. Input dir is for analyzing an existing folder.",
+            )
+            return
 
         # In packaged builds the backend default for input_dir lives inside the
         # read-only bundle, so preprocess.cleanup() crashes trying to write
         # .txt sidecars next to PDFs. Force the user to pick a writable dir.
-        if is_frozen() and not input_dir_raw:
+        if is_frozen() and not input_dir_raw and not scrape_before_analysis:
             messagebox.showwarning(
                 "Input directory required",
                 "When running from the packaged app, you must pick an Input dir "
@@ -416,6 +521,9 @@ class PipelineAgent:
             sample_limit=sample_limit,
             api_key=api_key,
             model=model,
+            county_key=county_key,
+            scrape_before_analysis=scrape_before_analysis,
+            form700_path=form700_path,
             on_log=self._on_log_event,
             on_progress=self._on_progress_event,
             on_finished=self._on_finished_event,

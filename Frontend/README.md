@@ -10,6 +10,10 @@ python main.py
 
 Requires Python 3.10+; `tkinter` ships with the standard library on standard CPython builds.
 
+The Pipeline tab includes a county selector, a scrape-before-analysis switch,
+and a Form 700 `.xlsx` picker for running county-specific filings against the
+matching disclosure workbook.
+
 ## Layout
 
 - `main.py` — entry point

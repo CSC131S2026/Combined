@@ -141,6 +141,17 @@ class PipelineRunner:
         self._lock = threading.Lock()
         self._cancel_event = threading.Event()
 
+    @classmethod
+    def supported_counties(cls) -> list[tuple[str, str]]:
+        """Return ``[(key, label), ...]`` for county scrapers bundled with Backend."""
+        try:
+            _ensure_backend_on_path()
+            from src.web_scrapers.county_registry import supported_counties  # type: ignore
+
+            return [(county.key, county.label) for county in supported_counties()]
+        except Exception:  # noqa: BLE001
+            return [("sacramento", "Sacramento County")]
+
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
@@ -164,6 +175,9 @@ class PipelineRunner:
         sample_limit: int = 0,
         api_key: str | None = None,
         model: str | None = None,
+        county_key: str | None = None,
+        scrape_before_analysis: bool = False,
+        form700_path: str | Path | None = None,
         on_log: Callable[[str], None] | None = None,
         on_progress: Callable[[int, int, str | None], None] | None = None,
         on_finished: Callable[[bool, str | None, str | None], None] | None = None,
@@ -181,6 +195,9 @@ class PipelineRunner:
                     "sample_limit": sample_limit,
                     "api_key": api_key,
                     "model": model,
+                    "county_key": county_key,
+                    "scrape_before_analysis": scrape_before_analysis,
+                    "form700_path": form700_path,
                     "on_log": on_log,
                     "on_progress": on_progress,
                     "on_finished": on_finished,
@@ -202,6 +219,24 @@ class PipelineRunner:
         except Exception:  # noqa: BLE001
             pass
 
+    def _scrape_county(
+        self,
+        county_key: str | None,
+        year: str | None,
+        on_log: Callable[[str], None] | None,
+    ) -> Path:
+        from src.web_scrapers.county_registry import (  # type: ignore
+            get_county_scraper,
+            scrape_county,
+        )
+
+        county = get_county_scraper(county_key)
+        scrape_year = str(year or county.default_year).strip() or county.default_year
+        self._emit(on_log, f"[runner] Scraping {county.label} packets for {scrape_year}...")
+        output_dir = scrape_county(county.key, scrape_year)
+        self._emit(on_log, f"[runner] Scrape output: {output_dir}")
+        return output_dir
+
     def _run(
         self,
         *,
@@ -210,6 +245,9 @@ class PipelineRunner:
         sample_limit: int,
         api_key: str | None,
         model: str | None,
+        county_key: str | None,
+        scrape_before_analysis: bool,
+        form700_path: str | Path | None,
         on_log: Callable[[str], None] | None,
         on_progress: Callable[[int, int, str | None], None] | None,
         on_finished: Callable[[bool, str | None, str | None], None] | None,
@@ -232,6 +270,15 @@ class PipelineRunner:
             env_overrides["OPENAI_CONFLICT_MODEL"] = model
         if sample_limit and sample_limit > 0:
             env_overrides["OPENAI_CONFLICT_SAMPLE_LIMIT"] = str(sample_limit)
+        if form700_path:
+            env_overrides["FORM700_XLSX_PATH"] = str(Path(form700_path).expanduser())
+        if scrape_before_analysis:
+            scrape_root = (
+                workdir / "web_scrapers" / "output_data"
+                if is_frozen()
+                else backend / "src" / "web_scrapers" / "output_data"
+            )
+            env_overrides["CONFLICT_SCRAPER_OUTPUT_DIR"] = str(scrape_root)
 
         if is_frozen():
             stem_year = (year or "default").strip() or "default"
@@ -250,12 +297,6 @@ class PipelineRunner:
             if bundled_form700.exists():
                 env_overrides.setdefault("FORM700_XLSX_PATH", str(bundled_form700))
 
-        argv: list[str] = []
-        if input_dir:
-            argv += ["--input-dir", str(input_dir)]
-        elif year:
-            argv += ["--year", str(year)]
-
         writer: _QueueWriter | None = None
         try:
             for key, value in env_overrides.items():
@@ -273,6 +314,23 @@ class PipelineRunner:
             sys.stderr = writer
 
             self._emit(on_log, f"[runner] Backend root: {backend}")
+
+            if scrape_before_analysis:
+                if input_dir:
+                    self._emit(
+                        on_log,
+                        "[runner] Input dir was provided; skipping county scraper and analyzing that directory.",
+                    )
+                elif self._cancel_event.is_set():
+                    cancelled = True
+                else:
+                    input_dir = self._scrape_county(county_key, year, on_log)
+
+            argv: list[str] = []
+            if input_dir:
+                argv += ["--input-dir", str(input_dir)]
+            elif year:
+                argv += ["--year", str(year)]
             self._emit(on_log, f"[runner] argv: {argv or '(defaults)'}")
 
             try:
@@ -291,9 +349,12 @@ class PipelineRunner:
                 # Re-implemented main loop. We deliberately do NOT call
                 # backend_mod.main() because it wraps the analysis in a Rich
                 # Live display that floods our log textbox with ANSI noise.
-                success, cancelled, output_json = self._run_pipeline(
-                    backend_mod, argv, on_progress
-                )
+                if cancelled:
+                    output_json = None
+                else:
+                    success, cancelled, output_json = self._run_pipeline(
+                        backend_mod, argv, on_progress
+                    )
             except SystemExit as exc:
                 code = exc.code if isinstance(exc.code, int) else 1
                 if code == 0:

@@ -11,7 +11,7 @@ Scraping, parsing, and LLM-flagging pipeline. See the [root README](../README.md
   - `higherSpec_openai.py` — OpenAI variant (resumable, with checkpointing)
   - `lowerSpec.py` — narrower scoring helpers
   - `form700_paths.py` — shared path resolver, honors `FORM700_XLSX_PATH`
-- `src/web_scrapers/` — Selenium-driven Sacramento County packet scraper plus `preprocess.py` tokenization.
+- `src/web_scrapers/` — county scraper registry, Selenium-driven Sacramento/Sonoma packet scrapers, and `preprocess.py` tokenization.
 - `src/docuAgent/` — document-writing agent helpers.
 - `tests/` — `unittest` contract tests (parser, scraper helpers, preprocess).
 
@@ -41,9 +41,14 @@ python3 src/llmFlagging/higherSpec_openai.py --resume-status
 - `conflict_flags_openai_<year>.csv` / `.json` — compatibility exports consumed by the frontend
 - `conflict_flags_openai_<year>_failed_pages.csv` — written only when pages fail analysis
 - `conflict_flags_openai_<year>_checkpoint.json` — legacy resumable run state retained during analysis
-- `src/web_scrapers/output_data/<year>/*.pdf` — downloaded packets
+- `src/web_scrapers/output_data/<year>/*.pdf` — downloaded Sacramento packets
+- `src/web_scrapers/output_data/sonoma/<year>/*.pdf` — downloaded Sonoma packets
 
 `higherSpec_openai.py` defaults to `src/web_scrapers/output_data/2019`; `--year` / `CONFLICT_INPUT_YEAR` select a different year folder, and `--input-dir` / `CONFLICT_INPUT_DIR` select a custom folder. CLI flags take precedence over env vars. Custom input folders use `conflict_flags_openai_<input-dir-name>` as the default output stem unless output path env vars override it.
+
+County scrapers write to `src/web_scrapers/output_data` by default. Set
+`CONFLICT_SCRAPER_OUTPUT_DIR` to redirect downloads, which is how packaged GUI
+runs avoid writing into the read-only bundled backend.
 
 The OpenAI matcher uses SQLite by default at `Backend/conflict_checker.sqlite3`. Use `CONFLICT_DB_PATH` or `--db-path` for another database path, or set `CONFLICT_DISABLE_DB=1` to keep the older JSON/CSV/checkpoint-only behavior. `--list-runs` / `--run-history` show recent SQLite runs without requiring an API key, `--show-run <run-id>` prints full provenance and failed pages for one run, and `--resume-status` reports how many current pages can be skipped before any OpenAI calls. JSON and CSV files remain part of the workflow for dashboard compatibility; SQLite is the preferred resume/history source when present.
 
