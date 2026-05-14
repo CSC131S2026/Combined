@@ -14,7 +14,7 @@ import queue
 import sys
 import threading
 from pathlib import Path
-from tkinter import filedialog, messagebox
+from tkinter import PhotoImage, filedialog, messagebox
 
 PROJECT_DIR = Path(__file__).resolve().parents[1]
 if not getattr(sys, "frozen", False):
@@ -22,11 +22,13 @@ if not getattr(sys, "frozen", False):
         sys.path.insert(0, str(PROJECT_DIR))
 
 import customtkinter as ctk
+from PIL import Image
 
 from agents.browser_agent import BrowserAgent
 from agents.pipeline_agent import PipelineAgent
 from core.data_loader import DataLoader, DEFAULT_PATH, BACKEND_DIR
 from shared.export_safety import neutralize_csv_row
+from shared.resource_path import resource_path
 from core.filter_engine import FilterEngine
 from core.filter_tasks import compute_filter_task, compute_full_aggregates
 from ui.email_dialog import EmailDialog
@@ -119,11 +121,29 @@ class ConflictDashboard:
 
     def _configure_root(self) -> None:
         self.root.title("Sacramento County — Conflict Signals Dashboard")
+        self._configure_window_icon()
         self.root.geometry("1500x900")
         self.root.minsize(1120, 720)
         self.root.configure(fg_color=COLORS["bg_primary"])
         self.root.grid_rowconfigure(0, weight=1)
         self.root.grid_columnconfigure(0, weight=1)
+
+    def _configure_window_icon(self) -> None:
+        icon_path = resource_path("assets", "app_logo.png")
+        if icon_path.exists():
+            try:
+                self._app_icon_image = PhotoImage(file=str(icon_path))
+                self.root.iconphoto(True, self._app_icon_image)
+            except Exception:  # noqa: BLE001
+                pass
+
+        if sys.platform.startswith("win"):
+            ico_path = resource_path("assets", "app_icon.ico")
+            if ico_path.exists():
+                try:
+                    self.root.iconbitmap(str(ico_path))
+                except Exception:  # noqa: BLE001
+                    pass
 
     def _on_appearance_change(self) -> None:
         mode = "dark" if self._appearance_var.get() else "light"
@@ -223,6 +243,7 @@ class ConflictDashboard:
         scroll.pack(fill="both", expand=True, padx=0, pady=0)
         scroll.grid_columnconfigure(0, weight=1)
 
+        self._build_brand_header(scroll)
         self._section_header(scroll, "Filter settings", "Source, confidence, people, and entity filters.")
 
         ctk.CTkLabel(
@@ -594,6 +615,47 @@ class ConflictDashboard:
             corner_radius=16,
             command=self._open_email_dialog,
         ).pack(fill="x", padx=16, pady=(2, 16))
+
+    def _build_brand_header(self, parent) -> None:
+        header = ctk.CTkFrame(parent, fg_color="transparent")
+        header.pack(fill="x", padx=16, pady=(16, 6))
+        header.grid_columnconfigure(1, weight=1)
+
+        logo_path = resource_path("assets", "app_logo.png")
+        if logo_path.exists():
+            try:
+                with Image.open(logo_path) as source:
+                    self._brand_logo_source = source.copy()
+                self._brand_logo_image = ctk.CTkImage(
+                    light_image=self._brand_logo_source,
+                    dark_image=self._brand_logo_source,
+                    size=(54, 54),
+                )
+                ctk.CTkLabel(
+                    header,
+                    image=self._brand_logo_image,
+                    text="",
+                    width=58,
+                    height=58,
+                    fg_color=COLORS["bg_card"],
+                    corner_radius=14,
+                ).grid(row=0, column=0, rowspan=2, padx=(0, 10), sticky="w")
+            except Exception:  # noqa: BLE001
+                pass
+
+        ctk.CTkLabel(
+            header,
+            text="ConflictChecker",
+            font=font("headline"),
+            text_color=COLORS["text_primary"],
+        ).grid(row=0, column=1, sticky="sw")
+
+        ctk.CTkLabel(
+            header,
+            text="Conflict Signals Dashboard",
+            font=font("body_small"),
+            text_color=COLORS["text_secondary"],
+        ).grid(row=1, column=1, sticky="nw", pady=(2, 0))
 
     def _section_header(self, parent, text: str, description: str) -> None:
         block = ctk.CTkFrame(parent, fg_color="transparent")

@@ -23,12 +23,24 @@ block_cipher = None
 # ``SPEC`` is injected by PyInstaller and points at this file.
 PROJECT_ROOT = os.path.abspath(os.path.dirname(SPEC))  # noqa: F821
 ENTRY = os.path.join(PROJECT_ROOT, "Frontend", "main.py")
+MAC_ICON = os.path.join(PROJECT_ROOT, "assets", "app_icon.icns")
+WIN_ICON = os.path.join(PROJECT_ROOT, "assets", "app_icon.ico")
+BUILD_ICON = None
+if sys.platform == "darwin":
+    BUILD_ICON = MAC_ICON
+elif sys.platform.startswith("win"):
+    BUILD_ICON = WIN_ICON
+if BUILD_ICON and not os.path.exists(BUILD_ICON):
+    print(f"[spec] WARNING: app icon missing, using default: {BUILD_ICON}")
+    BUILD_ICON = None
 
 # ---------------------------------------------------------------------------
 # Data files (bundled at ``Backend/...`` so ``resource_path("Backend")`` works
 # under PyInstaller's frozen ``sys._MEIPASS`` layout).
 # ---------------------------------------------------------------------------
 data_candidates = [
+    ("assets/app_logo.png", "assets"),
+    ("assets/app_icon.ico", "assets"),
     ("Backend/conflict_flags_openai.json", "Backend"),
     ("Backend/conflict_flags_openai.csv", "Backend"),
     ("Backend/conflict_flags_openai_2019.json", "Backend"),
@@ -212,7 +224,7 @@ if is_mac:
     app = BUNDLE(
         coll,
         name="ConflictChecker.app",
-        icon=None,
+        icon=BUILD_ICON,
         bundle_identifier="com.sacramento.conflictchecker",
         info_plist={
             "NSHighResolutionCapable": True,
@@ -242,5 +254,5 @@ else:
         target_arch=None,
         codesign_identity=None,
         entitlements_file=None,
-        icon=None,
+        icon=BUILD_ICON,
     )
