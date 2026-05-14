@@ -18,6 +18,7 @@ from shared.export_safety import neutralize_dataframe_for_spreadsheet
 from src.web_scrapers.preprocess import cleanup, read_texts
 from src.llmFlagging.form700_paths import resolve_form700_path
 from src.form700_parse.seven import normalize_shf
+from src.storage.sqlite_store import SQLiteStore, utc_now_iso
 
 import json
 import uuid
@@ -74,6 +75,7 @@ _OPENAI_MAX_API_RETRIES = int(os.getenv("OPENAI_CONFLICT_MAX_API_RETRIES", "4"))
 _REQUEST_CONCURRENCY = int(os.getenv("OPENAI_CONFLICT_CONCURRENCY", "16"))
 _FORCE_PREPROCESS = os.getenv("CONFLICT_FORCE_PREPROCESS", "").strip().lower() in {"1", "true", "yes", "on"}
 _DEFAULT_OUTPUT_STEM = "conflict_flags_openai"
+_DEFAULT_DB_NAME = "conflict_checker.sqlite3"
 
 
 def _anchor(p):
@@ -100,6 +102,11 @@ def _parse_runtime_args(argv=None):
         "--input-dir",
         default=None,
         help="Custom directory containing input PDFs/CSVs/TXTs (default: env CONFLICT_INPUT_DIR or output_data/<year>).",
+    )
+    parser.add_argument(
+        "--db-path",
+        default=None,
+        help=f"SQLite database path (default: env CONFLICT_DB_PATH or {_DEFAULT_DB_NAME}).",
     )
     args, unknown = parser.parse_known_args(argv)
     if unknown:
@@ -147,6 +154,11 @@ _OUTPUT_STEM = f"{_DEFAULT_OUTPUT_STEM}_{_slug(_INPUT_YEAR)}"
 _CSV_OUTPUT = _anchor(f"{_OUTPUT_STEM}.csv")
 _JSON_OUTPUT = _anchor(f"{_OUTPUT_STEM}.json")
 _CHECKPOINT = _anchor(f"{_OUTPUT_STEM}_checkpoint.json")
+_DB_PATH = _anchor(_DEFAULT_DB_NAME)
+_DB_ENABLED = True
+_db_store = None
+_DB_RUN_ID = None
+_DB_RESUME_STATE = None
 _LEGACY_CHECKPOINT_CANDIDATES = []
 _client = None
 pages = []
@@ -1235,8 +1247,45 @@ def _checkpoint_file_matches_current(path):
     return _checkpoint_input_matches(data.get('meta') or {})
 
 
+def _db_ready():
+    return _DB_ENABLED and _db_store is not None and _DB_RUN_ID is not None
+
+
+def _load_sqlite_resume_state():
+    if not _DB_ENABLED or _db_store is None:
+        return None
+    resume_state = _DB_RESUME_STATE
+    if not resume_state:
+        return None
+
+    raw_results = resume_state.get('results') or []
+    resume_run = resume_state.get('run') or {}
+    default_provider = resume_run.get('provider') or _PROVIDER_NAME
+    default_model = resume_run.get('model') or _MODEL_NAME
+    default_prompt_version = resume_run.get('prompt_version') or _PROMPT_VERSION
+    results = _normalize_loaded_results(raw_results, default_provider, default_model, default_prompt_version)
+    processed = set(resume_state.get('processed') or set())
+    failed = set(resume_state.get('failed') or set())
+    processed -= failed
+    token_usage = _coerce_token_usage(resume_state.get('token_usage') or _sum_token_usage(results))
+
+    if not processed and not failed and not results:
+        return None
+
+    _console.print(
+        f"[{_V4}]Resuming from SQLite:[/] [{_V3}]{len(processed)} processed, "
+        f"{len(failed)} retryable failures, {len(results)} results from run "
+        f"{resume_run.get('run_id', 'unknown')}[/]"
+    )
+    return results, processed, failed, token_usage, resume_run.get('run_id')
+
+
 def _load_checkpoint():
     global _CHECKPOINT_WRITES_ENABLED
+    sqlite_state = _load_sqlite_resume_state()
+    if sqlite_state is not None:
+        return sqlite_state
+
     checkpoint_path = None
     for candidate in [_CHECKPOINT, *_LEGACY_CHECKPOINT_CANDIDATES]:
         if candidate.exists():
@@ -1325,6 +1374,50 @@ def _save_checkpoint(res, processed, failed, token_usage, source_checkpoint=None
     tmp.replace(_CHECKPOINT)
 
 
+def _save_result_to_db(result):
+    if not _db_ready():
+        return
+    _db_store.upsert_analysis_result(_DB_RUN_ID, str(_INPUT_DIR), result)
+
+
+def _save_failed_result_to_db(page, token_usage, error_message):
+    if not _db_ready():
+        return
+    _db_store.upsert_failed_result(
+        _DB_RUN_ID,
+        str(_INPUT_DIR),
+        page.get('file'),
+        page.get('page'),
+        token_usage=token_usage,
+        error_message=error_message,
+    )
+
+
+def _seed_current_db_run(results):
+    if not _db_ready():
+        return
+    for result in results:
+        _save_result_to_db(result)
+
+
+def _update_current_db_run(state, *, status='running', completed=False):
+    if not _db_ready():
+        return
+    failed = state.get('failed') or set()
+    token_usage = _coerce_token_usage(state.get('token_usage_totals'))
+    _db_store.update_run(
+        _DB_RUN_ID,
+        status=status,
+        completed_at=utc_now_iso() if completed else None,
+        total_pages_scanned=len(pages),
+        total_pages_analyzed=len(filtered_pages),
+        total_results=len(state.get('results') or []),
+        failed_pages=len(failed),
+        token_usage=token_usage,
+        source_checkpoint=state.get('checkpoint_source'),
+    )
+
+
 # --- Execution ---
 
 def _refresh_runtime_settings(environ=None):
@@ -1351,6 +1444,7 @@ def _refresh_runtime_settings(environ=None):
 def _initialize_runtime(argv=None, environ=None):
     global _INPUT_YEAR, _INPUT_DIR, _INPUT_SOURCE, _OUTPUT_STEM
     global _CSV_OUTPUT, _JSON_OUTPUT, _CHECKPOINT, _LEGACY_CHECKPOINT_CANDIDATES
+    global _DB_PATH, _DB_ENABLED, _db_store, _DB_RUN_ID, _DB_RESUME_STATE
     global _client, pages, filtered_pages, filers, name_to_filer, entity_index
     global _CHECKPOINT_WRITES_ENABLED, _checkpoint_counter
 
@@ -1366,6 +1460,13 @@ def _initialize_runtime(argv=None, environ=None):
     _CSV_OUTPUT = _anchor(environ.get("CONFLICT_CSV_PATH", f"{_OUTPUT_STEM}.csv"))
     _JSON_OUTPUT = _anchor(environ.get("CONFLICT_JSON_PATH", f"{_OUTPUT_STEM}.json"))
     _CHECKPOINT = _anchor(environ.get("CONFLICT_CHECKPOINT_PATH", f"{_OUTPUT_STEM}_checkpoint.json"))
+    _DB_PATH = _anchor(runtime_args.db_path or environ.get("CONFLICT_DB_PATH") or _DEFAULT_DB_NAME)
+    _DB_ENABLED = environ.get("CONFLICT_DISABLE_DB", "").strip().lower() not in {"1", "true", "yes", "on"}
+    if _db_store is not None:
+        _db_store.close()
+    _db_store = None
+    _DB_RUN_ID = None
+    _DB_RESUME_STATE = None
     _LEGACY_CHECKPOINT_CANDIDATES = [
         _anchor(candidate)
         for candidate in environ.get("LEGACY_CONFLICT_CHECKPOINTS", "conflict_flags_checkpoint.json").split(":")
@@ -1382,6 +1483,10 @@ def _initialize_runtime(argv=None, environ=None):
     _console.print(
         f"[{_V4}]Outputs:[/] [{_V3}]{_CSV_OUTPUT}[/] [{_V4}]·[/] [{_V3}]{_JSON_OUTPUT}[/]"
     )
+    if _DB_ENABLED:
+        _console.print(f"[{_V4}]SQLite DB:[/] [{_V3}]{_DB_PATH}[/]")
+    else:
+        _console.print(f"[{_AMB}]SQLite DB disabled via CONFLICT_DISABLE_DB.[/]")
 
     _client = AsyncOpenAI(api_key=_require_openai_api_key(environ))
 
@@ -1415,6 +1520,39 @@ def _initialize_runtime(argv=None, environ=None):
         f"[bold {_V3}]{len(filtered_pages)}[/] [{_V4}]queued for analysis[/]"
     )
 
+    if _DB_ENABLED:
+        _db_store = SQLiteStore(_DB_PATH)
+        _db_store.upsert_pages(
+            str(_INPUT_DIR),
+            pages,
+            source_metadata={
+                "input_year": _INPUT_YEAR,
+                "input_source": _INPUT_SOURCE,
+                "provider": _PROVIDER_NAME,
+                "model": _MODEL_NAME,
+                "prompt_version": _PROMPT_VERSION,
+            },
+        )
+        _DB_RESUME_STATE = _db_store.latest_resume_state(
+            input_year=_INPUT_YEAR,
+            input_dir=str(_INPUT_DIR),
+            input_source=_INPUT_SOURCE,
+            provider=_PROVIDER_NAME,
+            model=_MODEL_NAME,
+            prompt_version=_PROMPT_VERSION,
+        )
+        _DB_RUN_ID = _db_store.start_run(
+            input_year=_INPUT_YEAR,
+            input_dir=str(_INPUT_DIR),
+            input_source=_INPUT_SOURCE,
+            provider=_PROVIDER_NAME,
+            model=_MODEL_NAME,
+            prompt_version=_PROMPT_VERSION,
+            output_stem=_OUTPUT_STEM,
+            total_pages_scanned=len(pages),
+            total_pages_analyzed=len(filtered_pages),
+        )
+
 
 async def _run_analysis(live, state):
     global _checkpoint_counter
@@ -1425,12 +1563,14 @@ async def _run_analysis(live, state):
         global _checkpoint_counter
         key = (page['file'], page['page'])
         page_token_usage = _empty_token_usage()
+        error_message = ''
         async with sem:
             try:
                 result, page_token_usage = await analyze_page(page)
             except Exception as e:
                 if isinstance(e, _AnalyzePageError):
                     _merge_token_usage(page_token_usage, e.token_usage)
+                error_message = str(e)
                 print(f"Error analyzing {page['file']} p{page['page']}: {e}")
                 result = None
             do_checkpoint = False
@@ -1438,11 +1578,13 @@ async def _run_analysis(live, state):
                 _merge_token_usage(state['token_usage_totals'], page_token_usage)
                 if result is None:
                     state['failed'].add(key)
+                    _save_failed_result_to_db(page, page_token_usage, error_message)
                     do_checkpoint = True
                 else:
                     state['processed'].add(key)
                     state['failed'].discard(key)
                     state['results'].append(result)
+                    _save_result_to_db(result)
                     state['recent'].appendleft(result)
                     if result['match']:
                         state['conflicts_count'] += 1
@@ -1452,6 +1594,8 @@ async def _run_analysis(live, state):
                 _checkpoint_counter += 1
                 if _checkpoint_counter % _CHECKPOINT_INTERVAL == 0:
                     do_checkpoint = True
+                if do_checkpoint:
+                    _update_current_db_run(state)
             live.update(
                 _make_layout(
                     state['progress'],
@@ -1507,6 +1651,8 @@ def _analyze_pages():
         'token_usage_totals': token_usage_totals,
         'checkpoint_source': checkpoint_source,
     }
+    _seed_current_db_run(results)
+    _update_current_db_run(state)
 
     with Live(
         _make_layout(
@@ -1529,6 +1675,7 @@ def _analyze_pages():
         state['token_usage_totals'],
         state['checkpoint_source'],
     )
+    _update_current_db_run(state)
     return state
 
 
@@ -1572,6 +1719,12 @@ def _write_outputs(state):
     with open(_JSON_OUTPUT, 'w') as fh:
         json.dump(payload, fh, indent=2)
 
+    _update_current_db_run(
+        state,
+        status='completed_with_failures' if failed else 'completed',
+        completed=True,
+    )
+
     if failed:
         if _CHECKPOINT_WRITES_ENABLED:
             _console.print(
@@ -1599,10 +1752,16 @@ def _write_outputs(state):
 
 
 def main(argv=None):
-    _initialize_runtime(argv)
-    state = _analyze_pages()
-    _write_outputs(state)
-    return 0
+    global _db_store
+    try:
+        _initialize_runtime(argv)
+        state = _analyze_pages()
+        _write_outputs(state)
+        return 0
+    finally:
+        if _db_store is not None:
+            _db_store.close()
+            _db_store = None
 
 
 if __name__ == "__main__":

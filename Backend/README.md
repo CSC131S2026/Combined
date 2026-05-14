@@ -29,15 +29,19 @@ OPENAI_API_KEY=sk-... CONFLICT_INPUT_YEAR=2019 OPENAI_CONFLICT_SAMPLE_LIMIT=5 \
     python3 src/llmFlagging/higherSpec_openai.py
 python3 src/llmFlagging/higherSpec_openai.py --year 2019
 python3 src/llmFlagging/higherSpec_openai.py --input-dir src/web_scrapers/output_data/2019
+python3 src/llmFlagging/higherSpec_openai.py --db-path conflict_checker.sqlite3
 ```
 
 ## Outputs
 
-- `conflict_flags_openai_<year>.csv` / `.json` — per-page conflict flags
-- `conflict_flags_openai_<year>_checkpoint.json` — resumable run state
+- `conflict_checker.sqlite3` — durable OpenAI matcher run metadata, extracted page text, and analysis results
+- `conflict_flags_openai_<year>.csv` / `.json` — compatibility exports consumed by the frontend
+- `conflict_flags_openai_<year>_checkpoint.json` — legacy resumable run state retained during analysis
 - `src/web_scrapers/output_data/<year>/*.pdf` — downloaded packets
 
 `higherSpec_openai.py` defaults to `src/web_scrapers/output_data/2019`; `--year` / `CONFLICT_INPUT_YEAR` select a different year folder, and `--input-dir` / `CONFLICT_INPUT_DIR` select a custom folder. CLI flags take precedence over env vars. Custom input folders use `conflict_flags_openai_<input-dir-name>` as the default output stem unless output path env vars override it.
+
+The OpenAI matcher uses SQLite by default at `Backend/conflict_checker.sqlite3`. Use `CONFLICT_DB_PATH` or `--db-path` for another database path, or set `CONFLICT_DISABLE_DB=1` to keep the older JSON/CSV/checkpoint-only behavior. JSON and CSV files remain part of the workflow for dashboard compatibility; SQLite is the preferred resume/history source when present.
 
 ## Notes on `preprocess.py`
 

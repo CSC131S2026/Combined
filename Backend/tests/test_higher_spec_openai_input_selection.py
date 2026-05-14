@@ -1,6 +1,7 @@
 import importlib.util
 import json
 import os
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -10,6 +11,10 @@ from pathlib import Path
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 SCRIPT = BACKEND_DIR / "src" / "llmFlagging" / "higherSpec_openai.py"
+if str(BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(BACKEND_DIR))
+
+from src.storage.sqlite_store import SQLiteStore
 
 
 class HigherSpecOpenAIInputSelectionTests(unittest.TestCase):
@@ -24,6 +29,8 @@ class HigherSpecOpenAIInputSelectionTests(unittest.TestCase):
         env.pop("OPENAI_API_KEY", None)
         env.pop("CONFLICT_INPUT_YEAR", None)
         env.pop("CONFLICT_INPUT_DIR", None)
+        env.pop("CONFLICT_DB_PATH", None)
+        env.pop("CONFLICT_DISABLE_DB", None)
         env.update(env_updates)
         return subprocess.run(
             [sys.executable, str(SCRIPT), *args],
@@ -38,6 +45,10 @@ class HigherSpecOpenAIInputSelectionTests(unittest.TestCase):
         env = os.environ.copy()
         env.pop("CONFLICT_INPUT_YEAR", None)
         env.pop("CONFLICT_INPUT_DIR", None)
+        env.pop("CONFLICT_DB_PATH", None)
+        env.pop("CONFLICT_DISABLE_DB", None)
+        if "CONFLICT_DB_PATH" not in env_updates and "CONFLICT_DISABLE_DB" not in env_updates:
+            env["CONFLICT_DISABLE_DB"] = "1"
         env.update(env_updates)
         return subprocess.run(
             [sys.executable, str(SCRIPT), *args],
@@ -166,6 +177,7 @@ class HigherSpecOpenAIInputSelectionTests(unittest.TestCase):
             input_dir = tmp_path / "empty_inputs"
             input_dir.mkdir()
             json_output = tmp_path / "flags.json"
+            db_path = tmp_path / "conflicts.sqlite3"
 
             result = self._run_with_env(
                 "--input-dir",
@@ -174,6 +186,7 @@ class HigherSpecOpenAIInputSelectionTests(unittest.TestCase):
                 CONFLICT_CSV_PATH=str(tmp_path / "flags.csv"),
                 CONFLICT_JSON_PATH=str(json_output),
                 CONFLICT_CHECKPOINT_PATH=str(tmp_path / "flags_checkpoint.json"),
+                CONFLICT_DB_PATH=str(db_path),
             )
 
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -182,6 +195,17 @@ class HigherSpecOpenAIInputSelectionTests(unittest.TestCase):
             self.assertEqual(payload["meta"]["input_source"], "custom")
             self.assertEqual(payload["meta"]["total_pages_scanned"], 0)
             self.assertEqual(payload["meta"]["total_results"], 0)
+            conn = sqlite3.connect(db_path)
+            try:
+                run = conn.execute(
+                    """
+                    SELECT input_dir, input_source, status, total_pages_scanned, total_results
+                    FROM runs
+                    """
+                ).fetchone()
+            finally:
+                conn.close()
+            self.assertEqual(run, (str(input_dir.resolve()), "custom", "completed", 0, 0))
 
     def test_mismatched_checkpoint_is_ignored_and_not_deleted(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -283,6 +307,83 @@ class HigherSpecOpenAIInputSelectionTests(unittest.TestCase):
             payload = json.loads(json_output.read_text())
             self.assertEqual(payload["meta"]["total_results"], 1)
             self.assertFalse(checkpoint.exists())
+
+    def test_sqlite_resume_skips_completed_page_without_openai_call(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            input_dir = tmp_path / "current_inputs"
+            input_dir.mkdir()
+            (input_dir / "packet.pdf.txt").write_text(
+                "This page discusses a conflict of interest involving Acme Contracting.",
+                encoding="utf-8",
+            )
+            db_path = tmp_path / "conflicts.sqlite3"
+            prompt_version = "sqlite-resume-test"
+            store = SQLiteStore(db_path)
+            run_id = store.start_run(
+                input_year="2019",
+                input_dir=str(input_dir.resolve()),
+                input_source="custom",
+                provider="openai",
+                model="gpt-5.4-mini",
+                prompt_version=prompt_version,
+                output_stem="flags",
+                total_pages_scanned=1,
+                total_pages_analyzed=1,
+            )
+            store.upsert_analysis_result(
+                run_id,
+                str(input_dir.resolve()),
+                {
+                    "file": "packet.pdf.txt",
+                    "page": 1,
+                    "match": False,
+                    "confidence": "low",
+                    "reasoning": "loaded from sqlite",
+                    "form700_officials": "",
+                    "form700_entities": "",
+                    "responsible_party": "",
+                    "responsible_party_type": "unknown",
+                    "responsible_party_role": "",
+                    "responsibility_source": "",
+                    "responsibility_entity": "",
+                    "accountability_candidates": [],
+                    "keywords_matched": ["conflict of interest"],
+                    "analysis_provider": "openai",
+                    "analysis_model": "gpt-5.4-mini",
+                    "analysis_prompt_version": prompt_version,
+                    "token_usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+                },
+            )
+            store.update_run(
+                run_id,
+                status="completed",
+                completed_at="2026-05-13T00:00:00+00:00",
+                total_pages_scanned=1,
+                total_pages_analyzed=1,
+                total_results=1,
+                failed_pages=0,
+                token_usage={"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+            )
+            store.close()
+            json_output = tmp_path / "flags.json"
+
+            result = self._run_with_env(
+                "--input-dir",
+                str(input_dir),
+                OPENAI_API_KEY="sk-test",
+                CONFLICT_PROMPT_VERSION=prompt_version,
+                CONFLICT_CSV_PATH=str(tmp_path / "flags.csv"),
+                CONFLICT_JSON_PATH=str(json_output),
+                CONFLICT_CHECKPOINT_PATH=str(tmp_path / "flags_checkpoint.json"),
+                CONFLICT_DB_PATH=str(db_path),
+            )
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn("Resuming from SQLite", result.stdout + result.stderr)
+            payload = json.loads(json_output.read_text())
+            self.assertEqual(payload["meta"]["total_results"], 1)
+            self.assertEqual(payload["results"][0]["conflict"]["reasoning"], "loaded from sqlite")
 
 
 if __name__ == "__main__":

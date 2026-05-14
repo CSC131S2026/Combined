@@ -74,9 +74,12 @@ python src/llmFlagging/higherSpec_openai.py
 # or:
 python src/llmFlagging/higherSpec_openai.py --year 2019
 python src/llmFlagging/higherSpec_openai.py --input-dir src/web_scrapers/output_data/2019
+python src/llmFlagging/higherSpec_openai.py --db-path conflict_checker.sqlite3
 ```
 
-Outputs land at `Backend/conflict_flags_openai_<year>.csv` and `.json`, with a `_checkpoint.json` for resumable runs. For `--input-dir` / `CONFLICT_INPUT_DIR`, the default output stem uses the input directory name instead; `CONFLICT_OUTPUT_STEM`, `CONFLICT_CSV_PATH`, `CONFLICT_JSON_PATH`, and `CONFLICT_CHECKPOINT_PATH` still override that.
+Run history and resume state are stored in SQLite at `Backend/conflict_checker.sqlite3` by default. `CONFLICT_DB_PATH` or `--db-path` can point at another database, and `CONFLICT_DISABLE_DB=1` restores the older file-only behavior. JSON/CSV outputs are still written at `Backend/conflict_flags_openai_<year>.csv` and `.json` for frontend compatibility; treat them as exports from the backend run state. The `_checkpoint.json` file is still written during analysis as a compatibility fallback for older runs.
+
+For `--input-dir` / `CONFLICT_INPUT_DIR`, the default output stem uses the input directory name instead; `CONFLICT_OUTPUT_STEM`, `CONFLICT_CSV_PATH`, `CONFLICT_JSON_PATH`, and `CONFLICT_CHECKPOINT_PATH` still override that.
 
 ### Conflict matching — local Ollama
 
@@ -101,8 +104,10 @@ python src/llmFlagging/higherSpec_chatollama.py
 | `OPENAI_CONFLICT_MAX_API_RETRIES` | `4` | Retry budget for transient errors |
 | `CONFLICT_FORCE_PREPROCESS` | `false` | Re-extract PDF text even when a current `.txt` cache exists |
 | `CONFLICT_OUTPUT_STEM` | `conflict_flags_openai_<year>` | Filename stem for CSV/JSON/checkpoint |
+| `CONFLICT_DB_PATH` | `Backend/conflict_checker.sqlite3` | SQLite database for run metadata, extracted page text, and analysis results |
+| `CONFLICT_DISABLE_DB` | `false` | Set to `1`, `true`, `yes`, or `on` to use only JSON/CSV/checkpoint files |
 
-CLI flags `--year` and `--input-dir` mirror the input environment variables and take precedence over them.
+CLI flags `--year`, `--input-dir`, and `--db-path` mirror the matching environment variables and take precedence over them.
 
 ## Tests
 
@@ -119,8 +124,9 @@ The Backend suite covers the Form 700 parser contract, the scraper helpers, and 
 ## Outputs
 
 - `Backend/src/web_scrapers/output_data/<year>/*.pdf` — downloaded filing packets
-- `Backend/conflict_flags_openai_<year>.csv` / `.json` — per-page conflict flags from the OpenAI matcher
-- `Backend/conflict_flags_openai_<year>_checkpoint.json` — resumable run state
+- `Backend/conflict_checker.sqlite3` — durable OpenAI matcher run metadata, page text, and analysis results
+- `Backend/conflict_flags_openai_<year>.csv` / `.json` — compatibility exports consumed by the dashboard
+- `Backend/conflict_flags_openai_<year>_checkpoint.json` — legacy resumable run state retained during analysis
 
 ## Notes
 
