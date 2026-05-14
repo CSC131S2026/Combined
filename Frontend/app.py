@@ -39,6 +39,21 @@ def _escape_reportlab_markup(value) -> str:
     return html.escape(str(value), quote=False)
 
 
+def _format_meta_timestamp(value) -> str:
+    if not value:
+        return "unknown"
+    return str(value).replace("T", " ").replace("+00:00", " UTC")
+
+
+def _format_token_usage_summary(usage) -> str:
+    if not isinstance(usage, dict):
+        return "tokens unknown"
+    input_tokens = int(usage.get("input_tokens") or 0)
+    output_tokens = int(usage.get("output_tokens") or 0)
+    total_tokens = int(usage.get("total_tokens") or (input_tokens + output_tokens))
+    return f"{total_tokens:,} total ({input_tokens:,} in / {output_tokens:,} out)"
+
+
 class ConflictDashboard:
 
     def __init__(self, root: ctk.CTk):
@@ -89,12 +104,24 @@ class ConflictDashboard:
 
         provider = meta.get("provider", "dataset")
         model = meta.get("model", "—")
+        prompt_version = meta.get("prompt_version") or "unknown prompt"
+        generated_at = _format_meta_timestamp(meta.get("generated_at"))
+        input_dir = meta.get("input_dir") or "unknown input"
+        token_summary = _format_token_usage_summary(meta.get("token_usage"))
+        failed_pages = int(meta.get("failed_pages") or 0)
+        failed_csv = meta.get("failed_pages_csv") or "none"
 
         self._sidebar_records_lbl.configure(text=f"{shown:,} in view / {loaded_total:,} loaded")
         self._sidebar_flags_lbl.configure(
             text=f"{flagged_visible:,} conflicts in current view · {flagged_total:,} total flagged"
         )
         self._sidebar_model_lbl.configure(text=f"{provider.upper()} / {model}")
+        self._generated_time_lbl.configure(text=f"Generated {generated_at}")
+        self._generated_input_lbl.configure(text=f"Input {input_dir}")
+        self._generated_prompt_lbl.configure(text=f"Prompt {prompt_version}")
+        self._generated_tokens_lbl.configure(text=f"Usage {token_summary}")
+        self._generated_failures_lbl.configure(text=f"Failures {failed_pages:,} pages")
+        self._generated_failed_csv_lbl.configure(text=f"Failure CSV {failed_csv}")
 
     # ------------------------------------------------------------------
     # Body layout
@@ -267,6 +294,90 @@ class ConflictDashboard:
             justify="left",
         )
         self._sidebar_model_lbl.grid(row=2, column=0, padx=14, pady=(0, 12), sticky="ew")
+
+        generated = ctk.CTkFrame(
+            scroll,
+            fg_color=COLORS["bg_card"],
+            corner_radius=14,
+            border_width=1,
+            border_color=COLORS["border"],
+        )
+        generated.pack(fill="x", padx=16, pady=(0, 12))
+        generated.grid_columnconfigure(0, weight=1)
+
+        ctk.CTkLabel(
+            generated,
+            text="Generated From",
+            font=font("label_bold"),
+            text_color=COLORS["text_muted"],
+            anchor="w",
+        ).grid(row=0, column=0, padx=14, pady=(12, 3), sticky="ew")
+
+        self._generated_time_lbl = ctk.CTkLabel(
+            generated,
+            text="Generated unknown",
+            font=font("body_small"),
+            text_color=COLORS["text_primary"],
+            anchor="w",
+            justify="left",
+            wraplength=250,
+        )
+        self._generated_time_lbl.grid(row=1, column=0, padx=14, pady=(0, 2), sticky="ew")
+
+        self._generated_input_lbl = ctk.CTkLabel(
+            generated,
+            text="Input unknown",
+            font=font("body_small"),
+            text_color=COLORS["text_primary"],
+            anchor="w",
+            justify="left",
+            wraplength=250,
+        )
+        self._generated_input_lbl.grid(row=2, column=0, padx=14, pady=(0, 2), sticky="ew")
+
+        self._generated_prompt_lbl = ctk.CTkLabel(
+            generated,
+            text="Prompt unknown",
+            font=font("body_small"),
+            text_color=COLORS["text_primary"],
+            anchor="w",
+            justify="left",
+            wraplength=250,
+        )
+        self._generated_prompt_lbl.grid(row=3, column=0, padx=14, pady=(0, 2), sticky="ew")
+
+        self._generated_tokens_lbl = ctk.CTkLabel(
+            generated,
+            text="Usage tokens unknown",
+            font=font("body_small"),
+            text_color=COLORS["text_primary"],
+            anchor="w",
+            justify="left",
+            wraplength=250,
+        )
+        self._generated_tokens_lbl.grid(row=4, column=0, padx=14, pady=(0, 2), sticky="ew")
+
+        self._generated_failures_lbl = ctk.CTkLabel(
+            generated,
+            text="Failures 0 pages",
+            font=font("body_small"),
+            text_color=COLORS["text_primary"],
+            anchor="w",
+            justify="left",
+            wraplength=250,
+        )
+        self._generated_failures_lbl.grid(row=5, column=0, padx=14, pady=(0, 2), sticky="ew")
+
+        self._generated_failed_csv_lbl = ctk.CTkLabel(
+            generated,
+            text="Failure CSV none",
+            font=font("body_small"),
+            text_color=COLORS["text_primary"],
+            anchor="w",
+            justify="left",
+            wraplength=250,
+        )
+        self._generated_failed_csv_lbl.grid(row=6, column=0, padx=14, pady=(0, 12), sticky="ew")
 
         ctk.CTkLabel(
             scroll,

@@ -75,11 +75,14 @@ python src/llmFlagging/higherSpec_openai.py
 python src/llmFlagging/higherSpec_openai.py --year 2019
 python src/llmFlagging/higherSpec_openai.py --input-dir src/web_scrapers/output_data/2019
 python src/llmFlagging/higherSpec_openai.py --db-path conflict_checker.sqlite3
+python src/llmFlagging/higherSpec_openai.py --list-runs
+python src/llmFlagging/higherSpec_openai.py --show-run <run-id>
+python src/llmFlagging/higherSpec_openai.py --resume-status
 ```
 
-Run history and resume state are stored in SQLite at `Backend/conflict_checker.sqlite3` by default. `CONFLICT_DB_PATH` or `--db-path` can point at another database, and `CONFLICT_DISABLE_DB=1` restores the older file-only behavior. JSON/CSV outputs are still written at `Backend/conflict_flags_openai_<year>.csv` and `.json` for frontend compatibility; treat them as exports from the backend run state. The `_checkpoint.json` file is still written during analysis as a compatibility fallback for older runs.
+Run history and resume state are stored in SQLite at `Backend/conflict_checker.sqlite3` by default. `CONFLICT_DB_PATH` or `--db-path` can point at another database, and `CONFLICT_DISABLE_DB=1` restores the older file-only behavior. `--list-runs` / `--run-history` show recent SQLite runs without requiring an API key; `--show-run <run-id>` prints full provenance and failed pages for one run; `--resume-status` scans the current input and reports how many pages SQLite can skip before any OpenAI calls. JSON/CSV outputs are still written at `Backend/conflict_flags_openai_<year>.csv` and `.json` for frontend compatibility; treat them as exports from the backend run state. The `_checkpoint.json` file is still written during analysis as a compatibility fallback for older runs.
 
-For `--input-dir` / `CONFLICT_INPUT_DIR`, the default output stem uses the input directory name instead; `CONFLICT_OUTPUT_STEM`, `CONFLICT_CSV_PATH`, `CONFLICT_JSON_PATH`, and `CONFLICT_CHECKPOINT_PATH` still override that.
+For `--input-dir` / `CONFLICT_INPUT_DIR`, the default output stem uses the input directory name instead; `CONFLICT_OUTPUT_STEM`, `CONFLICT_CSV_PATH`, `CONFLICT_JSON_PATH`, `CONFLICT_FAILED_CSV_PATH`, and `CONFLICT_CHECKPOINT_PATH` still override that.
 
 ### Conflict matching — local Ollama
 
@@ -104,10 +107,11 @@ python src/llmFlagging/higherSpec_chatollama.py
 | `OPENAI_CONFLICT_MAX_API_RETRIES` | `4` | Retry budget for transient errors |
 | `CONFLICT_FORCE_PREPROCESS` | `false` | Re-extract PDF text even when a current `.txt` cache exists |
 | `CONFLICT_OUTPUT_STEM` | `conflict_flags_openai_<year>` | Filename stem for CSV/JSON/checkpoint |
+| `CONFLICT_FAILED_CSV_PATH` | `Backend/conflict_flags_openai_<year>_failed_pages.csv` | Failed-page report written when any page fails analysis |
 | `CONFLICT_DB_PATH` | `Backend/conflict_checker.sqlite3` | SQLite database for run metadata, extracted page text, and analysis results |
 | `CONFLICT_DISABLE_DB` | `false` | Set to `1`, `true`, `yes`, or `on` to use only JSON/CSV/checkpoint files |
 
-CLI flags `--year`, `--input-dir`, and `--db-path` mirror the matching environment variables and take precedence over them.
+CLI flags `--year`, `--input-dir`, and `--db-path` mirror the matching environment variables and take precedence over them. `--list-runs`, `--run-history`, `--show-run`, and `--resume-status` are read-only command modes.
 
 ## Tests
 
@@ -126,6 +130,7 @@ The Backend suite covers the Form 700 parser contract, the scraper helpers, and 
 - `Backend/src/web_scrapers/output_data/<year>/*.pdf` — downloaded filing packets
 - `Backend/conflict_checker.sqlite3` — durable OpenAI matcher run metadata, page text, and analysis results
 - `Backend/conflict_flags_openai_<year>.csv` / `.json` — compatibility exports consumed by the dashboard
+- `Backend/conflict_flags_openai_<year>_failed_pages.csv` — written only when pages fail analysis
 - `Backend/conflict_flags_openai_<year>_checkpoint.json` — legacy resumable run state retained during analysis
 
 ## Notes

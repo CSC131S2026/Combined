@@ -1,5 +1,6 @@
 import csv
 import importlib.util
+import json
 import sys
 import tempfile
 import unittest
@@ -66,6 +67,38 @@ class HigherSpecOpenAIExportSafetyTests(unittest.TestCase):
 
         self.assertEqual(row["file"], "'@packet.pdf.txt")
         self.assertEqual(row["reasoning"], "'=HYPERLINK(\"https://example.test\")")
+
+    def test_write_outputs_exports_failed_pages_report(self):
+        module = _load_higher_spec_module()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            module._CSV_OUTPUT = tmp_path / "flags.csv"
+            module._JSON_OUTPUT = tmp_path / "flags.json"
+            module._FAILED_OUTPUT = tmp_path / "flags_failed_pages.csv"
+            module._CHECKPOINT = tmp_path / "flags_checkpoint.json"
+            module._CHECKPOINT_WRITES_ENABLED = False
+            module.pages = [{"file": "=packet.pdf.txt", "page": 1, "text": ""}]
+            module.filtered_pages = list(module.pages)
+
+            state = {
+                "results": [],
+                "failed": {("=packet.pdf.txt", 1)},
+                "failed_errors": {("=packet.pdf.txt", 1): "+timeout"},
+                "token_usage_totals": module._empty_token_usage(),
+            }
+
+            module._write_outputs(state)
+
+            with open(module._FAILED_OUTPUT, newline="", encoding="utf-8") as handle:
+                row = next(csv.DictReader(handle))
+            payload = json.loads(module._JSON_OUTPUT.read_text())
+
+        self.assertEqual(row["file"], "'=packet.pdf.txt")
+        self.assertEqual(row["error_message"], "'+timeout")
+        self.assertEqual(payload["meta"]["failed_pages"], 1)
+        self.assertEqual(payload["meta"]["failed_page_details"][0]["error_message"], "+timeout")
+        self.assertEqual(payload["meta"]["failed_pages_csv"], str(module._FAILED_OUTPUT))
 
 
 if __name__ == "__main__":

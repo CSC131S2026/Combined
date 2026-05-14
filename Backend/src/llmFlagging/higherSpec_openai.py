@@ -76,6 +76,7 @@ _REQUEST_CONCURRENCY = int(os.getenv("OPENAI_CONFLICT_CONCURRENCY", "16"))
 _FORCE_PREPROCESS = os.getenv("CONFLICT_FORCE_PREPROCESS", "").strip().lower() in {"1", "true", "yes", "on"}
 _DEFAULT_OUTPUT_STEM = "conflict_flags_openai"
 _DEFAULT_DB_NAME = "conflict_checker.sqlite3"
+_DEFAULT_RUN_HISTORY_LIMIT = 10
 
 
 def _anchor(p):
@@ -107,6 +108,33 @@ def _parse_runtime_args(argv=None):
         "--db-path",
         default=None,
         help=f"SQLite database path (default: env CONFLICT_DB_PATH or {_DEFAULT_DB_NAME}).",
+    )
+    parser.add_argument(
+        "--list-runs",
+        action="store_true",
+        help="List recent conflict-analysis runs from SQLite and exit.",
+    )
+    parser.add_argument(
+        "--run-history",
+        action="store_true",
+        help="Alias for --list-runs.",
+    )
+    parser.add_argument(
+        "--run-limit",
+        type=int,
+        default=_DEFAULT_RUN_HISTORY_LIMIT,
+        help=f"Maximum rows to show with --list-runs/--run-history (default: {_DEFAULT_RUN_HISTORY_LIMIT}).",
+    )
+    parser.add_argument(
+        "--resume-status",
+        action="store_true",
+        help="Show how many current pages can be skipped from SQLite resume state and exit before API calls.",
+    )
+    parser.add_argument(
+        "--show-run",
+        default=None,
+        metavar="RUN_ID",
+        help="Show full metadata and failed pages for one SQLite run, then exit.",
     )
     args, unknown = parser.parse_known_args(argv)
     if unknown:
@@ -153,6 +181,7 @@ _INPUT_SOURCE = "year"
 _OUTPUT_STEM = f"{_DEFAULT_OUTPUT_STEM}_{_slug(_INPUT_YEAR)}"
 _CSV_OUTPUT = _anchor(f"{_OUTPUT_STEM}.csv")
 _JSON_OUTPUT = _anchor(f"{_OUTPUT_STEM}.json")
+_FAILED_OUTPUT = _anchor(f"{_OUTPUT_STEM}_failed_pages.csv")
 _CHECKPOINT = _anchor(f"{_OUTPUT_STEM}_checkpoint.json")
 _DB_PATH = _anchor(_DEFAULT_DB_NAME)
 _DB_ENABLED = True
@@ -990,7 +1019,28 @@ async def analyze_page(page):
 _CONFIDENCE_ORDER = {'high': 0, 'medium': 1, 'low': 2}
 
 
-def build_frontend_payload(results, total_scanned, total_analyzed, token_usage=None, failed_pages=None):
+def _failed_page_detail_rows(failed_pages=None, failed_errors=None):
+    failed_errors = failed_errors or {}
+    rows = []
+    for file_name, page_num in sorted(failed_pages or []):
+        rows.append(
+            {
+                'file': file_name,
+                'page': page_num,
+                'error_message': failed_errors.get((file_name, page_num), ''),
+            }
+        )
+    return rows
+
+
+def build_frontend_payload(
+    results,
+    total_scanned,
+    total_analyzed,
+    token_usage=None,
+    failed_pages=None,
+    failed_errors=None,
+):
     """
     Builds a structured JSON payload intended for frontend consumption.
 
@@ -1121,6 +1171,8 @@ def build_frontend_payload(results, total_scanned, total_analyzed, token_usage=N
             'total_results': len(results),
             'failed_pages': len(failed_pages or []),
             'failed_page_refs': [{'file': file_name, 'page': page_num} for file_name, page_num in sorted(failed_pages or [])],
+            'failed_page_details': _failed_page_detail_rows(failed_pages, failed_errors),
+            'failed_pages_csv': str(_FAILED_OUTPUT) if failed_pages else None,
             'token_usage': _coerce_token_usage(token_usage or _sum_token_usage(results)),
             'token_usage_by_provider': _token_usage_by(results, lambda r: r.get('analysis_provider')),
             'token_usage_by_model': _token_usage_by(results, lambda r: r.get('analysis_model')),
@@ -1268,6 +1320,7 @@ def _load_sqlite_resume_state():
     failed = set(resume_state.get('failed') or set())
     processed -= failed
     token_usage = _coerce_token_usage(resume_state.get('token_usage') or _sum_token_usage(results))
+    failed_details = resume_state.get('failed_details') or []
 
     if not processed and not failed and not results:
         return None
@@ -1277,7 +1330,7 @@ def _load_sqlite_resume_state():
         f"{len(failed)} retryable failures, {len(results)} results from run "
         f"{resume_run.get('run_id', 'unknown')}[/]"
     )
-    return results, processed, failed, token_usage, resume_run.get('run_id')
+    return results, processed, failed, token_usage, resume_run.get('run_id'), failed_details
 
 
 def _load_checkpoint():
@@ -1293,7 +1346,7 @@ def _load_checkpoint():
             break
 
     if checkpoint_path is None:
-        return [], set(), set(), _empty_token_usage(), None
+        return [], set(), set(), _empty_token_usage(), None, []
 
     with open(checkpoint_path) as fh:
         data = json.load(fh)
@@ -1306,10 +1359,11 @@ def _load_checkpoint():
                 f"[{_AMB}]Ignoring checkpoint without input metadata:[/] "
                 f"[{_V3}]{checkpoint_path}[/]"
             )
-            return [], set(), set(), _empty_token_usage(), None
+            return [], set(), set(), _empty_token_usage(), None, []
         raw_results = data
         processed = {(r['file'], r['page']) for r in raw_results if isinstance(r, dict)}
         failed = set()
+        failed_details = []
         token_usage = _sum_token_usage(raw_results)
     else:
         checkpoint_meta = data.get('meta') or {}
@@ -1319,12 +1373,13 @@ def _load_checkpoint():
                 f"[{_AMB}]Ignoring checkpoint with mismatched input metadata:[/] "
                 f"[{_V3}]{checkpoint_path}[/]"
             )
-            return [], set(), set(), _empty_token_usage(), None
+            return [], set(), set(), _empty_token_usage(), None, []
         raw_results = data.get('results', [])
         raw = data.get('processed', [])
         processed = {(e[0], e[1]) if isinstance(e, list) else (e['file'], e['page']) for e in raw}
         raw_failed = data.get('failed', [])
         failed = {(e[0], e[1]) if isinstance(e, list) else (e['file'], e['page']) for e in raw_failed}
+        failed_details = data.get('failed_details') or _failed_page_detail_rows(failed)
         processed -= failed
         token_usage = _coerce_token_usage(data.get('token_usage') or _sum_token_usage(raw_results))
 
@@ -1344,10 +1399,10 @@ def _load_checkpoint():
             f"[{_V4}]Imported resume state from[/] [{_V3}]{checkpoint_path}[/] "
             f"[{_V4}]→[/] [{_V3}]{len(processed)} processed, {len(failed)} retryable failures, {len(results)} results[/]"
         )
-    return results, processed, failed, token_usage, checkpoint_path
+    return results, processed, failed, token_usage, checkpoint_path, failed_details
 
 
-def _save_checkpoint(res, processed, failed, token_usage, source_checkpoint=None):
+def _save_checkpoint(res, processed, failed, token_usage, source_checkpoint=None, failed_errors=None):
     if not _CHECKPOINT_WRITES_ENABLED:
         return
     tmp = _CHECKPOINT.with_suffix('.tmp')
@@ -1367,6 +1422,7 @@ def _save_checkpoint(res, processed, failed, token_usage, source_checkpoint=None
                 'results': res,
                 'processed': _serialize_page_keys(processed),
                 'failed': _serialize_page_keys(failed),
+                'failed_details': _failed_page_detail_rows(failed, failed_errors),
                 'token_usage': _coerce_token_usage(token_usage),
             },
             fh,
@@ -1441,9 +1497,16 @@ def _refresh_runtime_settings(environ=None):
     _SAMPLE_LIMIT = int(environ.get("OPENAI_CONFLICT_SAMPLE_LIMIT", "0"))
 
 
-def _initialize_runtime(argv=None, environ=None):
+def _initialize_runtime(
+    argv=None,
+    environ=None,
+    *,
+    runtime_args=None,
+    require_api_key=True,
+    start_db_run=True,
+):
     global _INPUT_YEAR, _INPUT_DIR, _INPUT_SOURCE, _OUTPUT_STEM
-    global _CSV_OUTPUT, _JSON_OUTPUT, _CHECKPOINT, _LEGACY_CHECKPOINT_CANDIDATES
+    global _CSV_OUTPUT, _JSON_OUTPUT, _FAILED_OUTPUT, _CHECKPOINT, _LEGACY_CHECKPOINT_CANDIDATES
     global _DB_PATH, _DB_ENABLED, _db_store, _DB_RUN_ID, _DB_RESUME_STATE
     global _client, pages, filtered_pages, filers, name_to_filer, entity_index
     global _CHECKPOINT_WRITES_ENABLED, _checkpoint_counter
@@ -1451,7 +1514,7 @@ def _initialize_runtime(argv=None, environ=None):
     environ = os.environ if environ is None else environ
     _refresh_runtime_settings(environ)
 
-    runtime_args = _parse_runtime_args(argv)
+    runtime_args = runtime_args or _parse_runtime_args(argv)
     input_config = _resolve_input_config(runtime_args, environ)
     _INPUT_YEAR = input_config["year"]
     _INPUT_DIR = input_config["input_dir"]
@@ -1459,6 +1522,7 @@ def _initialize_runtime(argv=None, environ=None):
     _OUTPUT_STEM = _default_output_stem(environ)
     _CSV_OUTPUT = _anchor(environ.get("CONFLICT_CSV_PATH", f"{_OUTPUT_STEM}.csv"))
     _JSON_OUTPUT = _anchor(environ.get("CONFLICT_JSON_PATH", f"{_OUTPUT_STEM}.json"))
+    _FAILED_OUTPUT = _anchor(environ.get("CONFLICT_FAILED_CSV_PATH", f"{_OUTPUT_STEM}_failed_pages.csv"))
     _CHECKPOINT = _anchor(environ.get("CONFLICT_CHECKPOINT_PATH", f"{_OUTPUT_STEM}_checkpoint.json"))
     _DB_PATH = _anchor(runtime_args.db_path or environ.get("CONFLICT_DB_PATH") or _DEFAULT_DB_NAME)
     _DB_ENABLED = environ.get("CONFLICT_DISABLE_DB", "").strip().lower() not in {"1", "true", "yes", "on"}
@@ -1467,6 +1531,7 @@ def _initialize_runtime(argv=None, environ=None):
     _db_store = None
     _DB_RUN_ID = None
     _DB_RESUME_STATE = None
+    _client = None
     _LEGACY_CHECKPOINT_CANDIDATES = [
         _anchor(candidate)
         for candidate in environ.get("LEGACY_CONFLICT_CHECKPOINTS", "conflict_flags_checkpoint.json").split(":")
@@ -1488,7 +1553,8 @@ def _initialize_runtime(argv=None, environ=None):
     else:
         _console.print(f"[{_AMB}]SQLite DB disabled via CONFLICT_DISABLE_DB.[/]")
 
-    _client = AsyncOpenAI(api_key=_require_openai_api_key(environ))
+    if require_api_key:
+        _client = AsyncOpenAI(api_key=_require_openai_api_key(environ))
 
     cleanup(
         _INPUT_DIR,
@@ -1541,17 +1607,18 @@ def _initialize_runtime(argv=None, environ=None):
             model=_MODEL_NAME,
             prompt_version=_PROMPT_VERSION,
         )
-        _DB_RUN_ID = _db_store.start_run(
-            input_year=_INPUT_YEAR,
-            input_dir=str(_INPUT_DIR),
-            input_source=_INPUT_SOURCE,
-            provider=_PROVIDER_NAME,
-            model=_MODEL_NAME,
-            prompt_version=_PROMPT_VERSION,
-            output_stem=_OUTPUT_STEM,
-            total_pages_scanned=len(pages),
-            total_pages_analyzed=len(filtered_pages),
-        )
+        if start_db_run:
+            _DB_RUN_ID = _db_store.start_run(
+                input_year=_INPUT_YEAR,
+                input_dir=str(_INPUT_DIR),
+                input_source=_INPUT_SOURCE,
+                provider=_PROVIDER_NAME,
+                model=_MODEL_NAME,
+                prompt_version=_PROMPT_VERSION,
+                output_stem=_OUTPUT_STEM,
+                total_pages_scanned=len(pages),
+                total_pages_analyzed=len(filtered_pages),
+            )
 
 
 async def _run_analysis(live, state):
@@ -1578,11 +1645,13 @@ async def _run_analysis(live, state):
                 _merge_token_usage(state['token_usage_totals'], page_token_usage)
                 if result is None:
                     state['failed'].add(key)
+                    state['failed_errors'][key] = error_message
                     _save_failed_result_to_db(page, page_token_usage, error_message)
                     do_checkpoint = True
                 else:
                     state['processed'].add(key)
                     state['failed'].discard(key)
+                    state['failed_errors'].pop(key, None)
                     state['results'].append(result)
                     _save_result_to_db(result)
                     state['recent'].appendleft(result)
@@ -1613,14 +1682,20 @@ async def _run_analysis(live, state):
                     state['failed'],
                     state['token_usage_totals'],
                     state['checkpoint_source'],
+                    failed_errors=state['failed_errors'],
                 )
 
     await asyncio.gather(*[bounded(p) for p in state['remaining_pages']])
 
 
 def _analyze_pages():
-    prior_results, done_set, failed_set, token_usage_totals, checkpoint_source = _load_checkpoint()
+    prior_results, done_set, failed_set, token_usage_totals, checkpoint_source, failed_details = _load_checkpoint()
     remaining_pages = [p for p in filtered_pages if (p['file'], p['page']) not in done_set]
+    failed_errors = {
+        (detail.get('file'), detail.get('page')): detail.get('error_message', '')
+        for detail in failed_details
+        if isinstance(detail, dict)
+    }
 
     progress = Progress(
         SpinnerColumn(style=_V5),
@@ -1642,6 +1717,8 @@ def _analyze_pages():
         'results': results,
         'processed': set(done_set),
         'failed': set(failed_set),
+        'failed_errors': failed_errors,
+        'resume_skipped_pages': len(done_set),
         'conflicts_count': sum(1 for r in results if r['match']),
         'conf_counts': {
             'high': sum(1 for r in results if r['confidence'] == 'high'),
@@ -1674,14 +1751,274 @@ def _analyze_pages():
         state['failed'],
         state['token_usage_totals'],
         state['checkpoint_source'],
+        failed_errors=state['failed_errors'],
     )
     _update_current_db_run(state)
     return state
 
 
+def _write_failed_pages_report(failed, failed_errors):
+    if not failed:
+        return None
+    rows = _failed_page_detail_rows(failed, failed_errors)
+    df = neutralize_dataframe_for_spreadsheet(
+        pd.DataFrame(rows, columns=['file', 'page', 'error_message'])
+    )
+    df.to_csv(_FAILED_OUTPUT, index=False)
+    return _FAILED_OUTPUT
+
+
+def _print_completion_receipt(payload, state, *, status, failed_report_path=None):
+    meta = payload.get('meta', {})
+    token_usage = _coerce_token_usage(meta.get('token_usage'))
+    receipt = Table(
+        title=f"[bold {_V3}]Run Receipt[/]",
+        box=box.ROUNDED,
+        border_style=_V6,
+        header_style=f"bold {_V4}",
+        show_header=False,
+    )
+    receipt.add_column("Field", style=_V4, no_wrap=True)
+    receipt.add_column("Value", style=_V3, overflow="fold")
+
+    receipt.add_row("Run ID", _DB_RUN_ID or ("not recorded" if _DB_ENABLED else "SQLite disabled"))
+    receipt.add_row("Status", status)
+    receipt.add_row("DB path", str(_DB_PATH) if _DB_ENABLED else "disabled")
+    receipt.add_row("Input dir", str(_INPUT_DIR))
+    receipt.add_row("Model", f"{_PROVIDER_NAME} / {_MODEL_NAME}")
+    receipt.add_row("Prompt", _PROMPT_VERSION)
+    receipt.add_row("Pages scanned", _format_token_count(meta.get('total_pages_scanned')))
+    receipt.add_row("Pages analyzed", _format_token_count(meta.get('total_pages_analyzed')))
+    receipt.add_row("Skipped by resume", _format_token_count(state.get('resume_skipped_pages')))
+    receipt.add_row("Attempted this run", _format_token_count(len(state.get('remaining_pages') or [])))
+    receipt.add_row("Results written", _format_token_count(meta.get('total_results')))
+    receipt.add_row("Failed pages", _format_token_count(meta.get('failed_pages')))
+    receipt.add_row("CSV export", str(_CSV_OUTPUT))
+    receipt.add_row("JSON export", str(_JSON_OUTPUT))
+    receipt.add_row("Failure CSV", str(failed_report_path) if failed_report_path else "none")
+    receipt.add_row(
+        "Tokens",
+        (
+            f"input {_format_token_count(token_usage.get('input_tokens'))}, "
+            f"output {_format_token_count(token_usage.get('output_tokens'))}, "
+            f"total {_format_token_count(token_usage.get('total_tokens'))}"
+        ),
+    )
+
+    _console.print()
+    _console.print(receipt)
+
+
+def _format_run_time(value):
+    text = _normalize_space(value)
+    if not text:
+        return ""
+    return text.replace("T", " ").replace("+00:00", " UTC")
+
+
+def _print_run_history(runtime_args, environ=None):
+    environ = os.environ if environ is None else environ
+    if environ.get("CONFLICT_DISABLE_DB", "").strip().lower() in {"1", "true", "yes", "on"}:
+        _console.print(f"[{_AMB}]SQLite DB is disabled via CONFLICT_DISABLE_DB.[/]")
+        return 0
+
+    db_path = _anchor(runtime_args.db_path or environ.get("CONFLICT_DB_PATH") or _DEFAULT_DB_NAME)
+    if not db_path.exists():
+        _console.print(f"[{_AMB}]No SQLite DB found at[/] [{_V3}]{db_path}[/]")
+        return 0
+
+    limit = max(1, int(runtime_args.run_limit or _DEFAULT_RUN_HISTORY_LIMIT))
+    store = SQLiteStore(db_path)
+    try:
+        runs = store.list_runs(limit=limit)
+    finally:
+        store.close()
+
+    table = Table(
+        title=f"[bold {_V3}]Recent Runs[/]",
+        box=box.ROUNDED,
+        border_style=_V6,
+        header_style=f"bold {_V4}",
+    )
+    table.add_column("Run", style=_V3, no_wrap=True)
+    table.add_column("Status", style=_V4, no_wrap=True)
+    table.add_column("Started", style=_V3, no_wrap=False)
+    table.add_column("Pages", style=_V3, justify="right", no_wrap=True)
+    table.add_column("Results", style=_V3, justify="right", no_wrap=True)
+    table.add_column("Failed", style=_AMB, justify="right", no_wrap=True)
+    table.add_column("Tokens", style=_V3, justify="right", no_wrap=True)
+
+    for run in runs:
+        run_id = run.get("run_id") or ""
+        table.add_row(
+            run_id[:8],
+            run.get("status") or "",
+            _format_run_time(run.get("started_at")),
+            f"{int(run.get('total_pages_analyzed') or 0):,}/{int(run.get('total_pages_scanned') or 0):,}",
+            f"{int(run.get('total_results') or 0):,}",
+            f"{int(run.get('failed_pages') or 0):,}",
+            f"{int(run.get('total_tokens') or 0):,}",
+        )
+
+    _console.print(f"[{_V4}]SQLite DB:[/] [{_V3}]{db_path}[/]")
+    if runs:
+        _console.print(table)
+        for run in runs:
+            _console.print(
+                f"[{_V4}]Run ID:[/] [{_V3}]{run.get('run_id') or ''}[/] "
+                f"[{_V4}]Status:[/] [{_V3}]{run.get('status') or ''}[/]"
+            )
+            _console.print(
+                f"[{_V4}]  Input:[/] [{_V3}]{run.get('input_dir') or ''}[/]"
+            )
+            _console.print(
+                f"[{_V4}]  Model/Prompt:[/] [{_V3}]{run.get('provider') or ''} / "
+                f"{run.get('model') or ''} / {run.get('prompt_version') or ''}[/]"
+            )
+            _console.print(
+                f"[{_V4}]  Output stem:[/] [{_V3}]{run.get('output_stem') or ''}[/]"
+            )
+    else:
+        _console.print(f"[{_V4}]No runs recorded yet.[/]")
+    return 0
+
+
+def _print_show_run(runtime_args, environ=None):
+    environ = os.environ if environ is None else environ
+    if environ.get("CONFLICT_DISABLE_DB", "").strip().lower() in {"1", "true", "yes", "on"}:
+        _console.print(f"[{_AMB}]SQLite DB is disabled via CONFLICT_DISABLE_DB.[/]")
+        return 1
+
+    db_path = _anchor(runtime_args.db_path or environ.get("CONFLICT_DB_PATH") or _DEFAULT_DB_NAME)
+    if not db_path.exists():
+        _console.print(f"[{_AMB}]No SQLite DB found at[/] [{_V3}]{db_path}[/]")
+        return 1
+
+    store = SQLiteStore(db_path)
+    try:
+        run = store.get_run(runtime_args.show_run)
+        failed_pages = store.failed_pages_for_run(runtime_args.show_run) if run else []
+    finally:
+        store.close()
+
+    if not run:
+        _console.print(f"[{_AMB}]Run not found:[/] [{_V3}]{runtime_args.show_run}[/]")
+        return 1
+
+    token_usage = {
+        "input_tokens": run.get("input_tokens"),
+        "output_tokens": run.get("output_tokens"),
+        "total_tokens": run.get("total_tokens"),
+    }
+    table = Table(
+        title=f"[bold {_V3}]Run Detail[/]",
+        box=box.ROUNDED,
+        border_style=_V6,
+        header_style=f"bold {_V4}",
+        show_header=False,
+    )
+    table.add_column("Field", style=_V4, no_wrap=True)
+    table.add_column("Value", style=_V3, overflow="fold")
+    table.add_row("Run ID", run.get("run_id") or "")
+    table.add_row("Status", run.get("status") or "")
+    table.add_row("Started", _format_run_time(run.get("started_at")))
+    table.add_row("Completed", _format_run_time(run.get("completed_at")))
+    table.add_row("DB path", str(db_path))
+    table.add_row("Input dir", run.get("input_dir") or "")
+    table.add_row("Input year/source", f"{run.get('input_year') or ''} / {run.get('input_source') or ''}")
+    table.add_row("Model", f"{run.get('provider') or ''} / {run.get('model') or ''}")
+    table.add_row("Prompt", run.get("prompt_version") or "")
+    table.add_row("Output stem", run.get("output_stem") or "")
+    table.add_row("Source checkpoint", run.get("source_checkpoint") or "none")
+    table.add_row("Pages scanned", _format_token_count(run.get("total_pages_scanned")))
+    table.add_row("Pages analyzed", _format_token_count(run.get("total_pages_analyzed")))
+    table.add_row("Results", _format_token_count(run.get("total_results")))
+    table.add_row("Failed pages", _format_token_count(run.get("failed_pages")))
+    table.add_row(
+        "Tokens",
+        (
+            f"input {_format_token_count(token_usage.get('input_tokens'))}, "
+            f"output {_format_token_count(token_usage.get('output_tokens'))}, "
+            f"total {_format_token_count(token_usage.get('total_tokens'))}"
+        ),
+    )
+    _console.print(table)
+
+    if failed_pages:
+        failed_table = Table(
+            title=f"[bold {_AMB}]Failed Pages[/]",
+            box=box.ROUNDED,
+            border_style=_AMB,
+            header_style=f"bold {_V4}",
+        )
+        failed_table.add_column("File", style=_V3, no_wrap=False, max_width=42)
+        failed_table.add_column("Pg", style=_V4, justify="right", no_wrap=True)
+        failed_table.add_column("Error", style=_V3, no_wrap=False, max_width=72)
+        for page in failed_pages:
+            failed_table.add_row(
+                page.get("file") or "",
+                str(page.get("page") or ""),
+                page.get("error_message") or "",
+            )
+        _console.print(failed_table)
+    else:
+        _console.print(f"[{_V4}]No failed pages recorded for this run.[/]")
+
+    _console.print(f"[{_V4}]No OpenAI API calls were made.[/]")
+    return 0
+
+
+def _print_resume_status():
+    if not _DB_ENABLED or _db_store is None:
+        _console.print(f"[{_AMB}]Resume status unavailable because SQLite DB is disabled.[/]")
+        return 0
+
+    current_keys = {(page['file'], page['page']) for page in filtered_pages}
+    resume_state = _DB_RESUME_STATE or {}
+    resume_run = resume_state.get('run') or {}
+    processed = set(resume_state.get('processed') or set())
+    failed = set(resume_state.get('failed') or set())
+    skippable = processed & current_keys
+    retryable_failures = failed & current_keys
+    remaining = max(0, len(filtered_pages) - len(skippable))
+    token_usage = _coerce_token_usage(resume_state.get('token_usage'))
+
+    table = Table(
+        title=f"[bold {_V3}]Resume Status[/]",
+        box=box.ROUNDED,
+        border_style=_V6,
+        header_style=f"bold {_V4}",
+        show_header=False,
+    )
+    table.add_column("Field", style=_V4, no_wrap=True)
+    table.add_column("Value", style=_V3, overflow="fold")
+    table.add_row("DB path", str(_DB_PATH))
+    table.add_row("Input dir", str(_INPUT_DIR))
+    table.add_row("Model", f"{_PROVIDER_NAME} / {_MODEL_NAME}")
+    table.add_row("Prompt", _PROMPT_VERSION)
+    table.add_row("Latest reusable run", resume_run.get('run_id') or "none")
+    table.add_row("Pages scanned", _format_token_count(len(pages)))
+    table.add_row("Pages queued", _format_token_count(len(filtered_pages)))
+    table.add_row("SQLite can skip", _format_token_count(len(skippable)))
+    table.add_row("Pages remaining", _format_token_count(remaining))
+    table.add_row("Prior failed pages retried", _format_token_count(len(retryable_failures)))
+    table.add_row(
+        "Prior tokens",
+        (
+            f"input {_format_token_count(token_usage.get('input_tokens'))}, "
+            f"output {_format_token_count(token_usage.get('output_tokens'))}, "
+            f"total {_format_token_count(token_usage.get('total_tokens'))}"
+        ),
+    )
+    _console.print(table)
+    _console.print(f"[{_V4}]No OpenAI API calls were made.[/]")
+    return 0
+
+
 def _write_outputs(state):
     results = state['results']
     failed = state['failed']
+    failed_errors = state.get('failed_errors') or {}
     token_usage_totals = state['token_usage_totals']
 
     summary = Table(
@@ -1715,17 +2052,29 @@ def _write_outputs(state):
     df = neutralize_dataframe_for_spreadsheet(pd.DataFrame(results))
     df.to_csv(_CSV_OUTPUT, index=False)
 
-    payload = build_frontend_payload(results, len(pages), len(filtered_pages), token_usage_totals, failed)
+    failed_report_path = _write_failed_pages_report(failed, failed_errors)
+    payload = build_frontend_payload(
+        results,
+        len(pages),
+        len(filtered_pages),
+        token_usage_totals,
+        failed,
+        failed_errors,
+    )
     with open(_JSON_OUTPUT, 'w') as fh:
         json.dump(payload, fh, indent=2)
 
+    final_status = 'completed_with_failures' if failed else 'completed'
     _update_current_db_run(
         state,
-        status='completed_with_failures' if failed else 'completed',
+        status=final_status,
         completed=True,
     )
 
     if failed:
+        _console.print(
+            f"[{_AMB}]Failed pages report:[/] [{_V3}]{failed_report_path}[/]"
+        )
         if _CHECKPOINT_WRITES_ENABLED:
             _console.print(
                 f"[{_AMB}]Checkpoint retained:[/] [{_V3}]{len(failed)} page(s) still failed and will be retried on the next run via {_CHECKPOINT}[/]"
@@ -1748,13 +2097,29 @@ def _write_outputs(state):
         f"[{_V4}]({payload['summary']['conflicts_flagged']} conflict(s) / "
         f"{payload['meta']['total_results']} analyzed, {payload['meta']['failed_pages']} failed)[/]"
     )
+    _print_completion_receipt(payload, state, status=final_status, failed_report_path=failed_report_path)
     return payload
 
 
 def main(argv=None):
     global _db_store
     try:
-        _initialize_runtime(argv)
+        runtime_args = _parse_runtime_args(argv)
+        if runtime_args.list_runs or runtime_args.run_history:
+            return _print_run_history(runtime_args)
+        if runtime_args.show_run:
+            return _print_show_run(runtime_args)
+
+        resume_status_only = bool(runtime_args.resume_status)
+        _initialize_runtime(
+            argv,
+            runtime_args=runtime_args,
+            require_api_key=not resume_status_only,
+            start_db_run=not resume_status_only,
+        )
+        if resume_status_only:
+            return _print_resume_status()
+
         state = _analyze_pages()
         _write_outputs(state)
         return 0

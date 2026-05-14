@@ -417,6 +417,51 @@ class SQLiteStore:
                 return resume_state
         return None
 
+    def list_runs(self, limit=10):
+        rows = self.conn.execute(
+            """
+            SELECT *
+            FROM runs
+            ORDER BY datetime(started_at) DESC, started_at DESC
+            LIMIT ?
+            """,
+            (int(limit or 10),),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def get_run(self, run_id):
+        row = self.conn.execute(
+            """
+            SELECT *
+            FROM runs
+            WHERE run_id = ?
+            """,
+            (str(run_id),),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def failed_pages_for_run(self, run_id):
+        rows = self.conn.execute(
+            """
+            SELECT file, page, error_message, analyzed_at, token_usage
+            FROM analysis_results
+            WHERE run_id = ?
+              AND status = 'failed'
+            ORDER BY file, page
+            """,
+            (str(run_id),),
+        ).fetchall()
+        return [
+            {
+                "file": row["file"],
+                "page": parse_page_key(row["page"]),
+                "error_message": row["error_message"] or "",
+                "analyzed_at": row["analyzed_at"] or "",
+                "token_usage": _token_usage(row["token_usage"]),
+            }
+            for row in rows
+        ]
+
     def _resume_state_for_run(self, row):
         result_rows = self.conn.execute(
             """
@@ -433,6 +478,7 @@ class SQLiteStore:
         completed = []
         processed = set()
         failed = set()
+        failed_details = []
         token_usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
         for result_row in result_rows:
             usage = _token_usage(result_row["token_usage"])
@@ -445,6 +491,15 @@ class SQLiteStore:
                 processed.add(key)
             elif result_row["status"] == "failed":
                 failed.add(key)
+                failed_details.append(
+                    {
+                        "file": result_row["file"],
+                        "page": parse_page_key(result_row["page"]),
+                        "error_message": result_row["error_message"] or "",
+                        "analyzed_at": result_row["analyzed_at"] or "",
+                        "token_usage": usage,
+                    }
+                )
 
         if not processed and not failed:
             return None
@@ -454,6 +509,7 @@ class SQLiteStore:
             "results": completed,
             "processed": processed,
             "failed": failed,
+            "failed_details": failed_details,
             "token_usage": token_usage,
         }
 

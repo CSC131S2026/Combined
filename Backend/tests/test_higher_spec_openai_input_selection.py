@@ -385,6 +385,171 @@ class HigherSpecOpenAIInputSelectionTests(unittest.TestCase):
             self.assertEqual(payload["meta"]["total_results"], 1)
             self.assertEqual(payload["results"][0]["conflict"]["reasoning"], "loaded from sqlite")
 
+    def test_list_runs_does_not_require_openai_api_key(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            db_path = tmp_path / "conflicts.sqlite3"
+            store = SQLiteStore(db_path)
+            run_id = store.start_run(
+                input_year="2019",
+                input_dir="/inputs",
+                input_source="year",
+                provider="openai",
+                model="gpt-5.4-mini",
+                prompt_version="history-test",
+                output_stem="flags",
+                total_pages_scanned=3,
+                total_pages_analyzed=2,
+            )
+            store.update_run(
+                run_id,
+                status="completed",
+                completed_at="2026-05-13T00:00:00+00:00",
+                total_results=2,
+                failed_pages=0,
+                token_usage={"input_tokens": 10, "output_tokens": 4, "total_tokens": 14},
+            )
+            store.close()
+
+            result = self._run_without_api_key("--db-path", str(db_path), "--list-runs")
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            output = result.stdout + result.stderr
+            self.assertIn("Recent Runs", output)
+            self.assertIn(run_id, output)
+            self.assertIn("completed", output)
+            self.assertNotIn("OPENAI_API_KEY is not set", output)
+
+    def test_resume_status_does_not_require_openai_api_key_or_create_run(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            input_dir = tmp_path / "current_inputs"
+            input_dir.mkdir()
+            (input_dir / "packet.pdf.txt").write_text(
+                "This page discusses a conflict of interest involving Acme Contracting.",
+                encoding="utf-8",
+            )
+            db_path = tmp_path / "conflicts.sqlite3"
+            prompt_version = "resume-status-test"
+            store = SQLiteStore(db_path)
+            run_id = store.start_run(
+                input_year="2019",
+                input_dir=str(input_dir.resolve()),
+                input_source="custom",
+                provider="openai",
+                model="gpt-5.4-mini",
+                prompt_version=prompt_version,
+                output_stem="flags",
+                total_pages_scanned=1,
+                total_pages_analyzed=1,
+            )
+            store.upsert_analysis_result(
+                run_id,
+                str(input_dir.resolve()),
+                {
+                    "file": "packet.pdf.txt",
+                    "page": 1,
+                    "match": False,
+                    "confidence": "low",
+                    "reasoning": "loaded from sqlite",
+                    "form700_officials": "",
+                    "form700_entities": "",
+                    "responsible_party": "",
+                    "responsible_party_type": "unknown",
+                    "responsible_party_role": "",
+                    "responsibility_source": "",
+                    "responsibility_entity": "",
+                    "accountability_candidates": [],
+                    "keywords_matched": ["conflict of interest"],
+                    "analysis_provider": "openai",
+                    "analysis_model": "gpt-5.4-mini",
+                    "analysis_prompt_version": prompt_version,
+                    "token_usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+                },
+            )
+            store.update_run(
+                run_id,
+                status="completed",
+                completed_at="2026-05-13T00:00:00+00:00",
+                total_pages_scanned=1,
+                total_pages_analyzed=1,
+                total_results=1,
+                failed_pages=0,
+                token_usage={"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+            )
+            store.close()
+
+            result = self._run_without_api_key(
+                "--input-dir",
+                str(input_dir),
+                "--db-path",
+                str(db_path),
+                "--resume-status",
+                CONFLICT_PROMPT_VERSION=prompt_version,
+                OPENAI_CONFLICT_MODEL="gpt-5.4-mini",
+            )
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            output = result.stdout + result.stderr
+            self.assertIn("Resume Status", output)
+            self.assertIn(run_id, output)
+            self.assertIn("SQLite can skip", output)
+            self.assertIn("No OpenAI API calls were made", output)
+            self.assertNotIn("OPENAI_API_KEY is not set", output)
+
+            conn = sqlite3.connect(db_path)
+            try:
+                run_count = conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0]
+            finally:
+                conn.close()
+            self.assertEqual(run_count, 1)
+
+    def test_show_run_does_not_require_openai_api_key_and_lists_failures(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            db_path = tmp_path / "conflicts.sqlite3"
+            store = SQLiteStore(db_path)
+            run_id = store.start_run(
+                input_year="2019",
+                input_dir="/inputs",
+                input_source="year",
+                provider="openai",
+                model="gpt-5.4-mini",
+                prompt_version="show-run-test",
+                output_stem="flags",
+                total_pages_scanned=3,
+                total_pages_analyzed=2,
+            )
+            store.upsert_failed_result(
+                run_id,
+                "/inputs",
+                "packet.pdf.txt",
+                2,
+                token_usage={"input_tokens": 4, "output_tokens": 1, "total_tokens": 5},
+                error_message="timeout",
+            )
+            store.update_run(
+                run_id,
+                status="completed_with_failures",
+                completed_at="2026-05-13T00:00:00+00:00",
+                total_results=0,
+                failed_pages=1,
+                token_usage={"input_tokens": 4, "output_tokens": 1, "total_tokens": 5},
+            )
+            store.close()
+
+            result = self._run_without_api_key("--db-path", str(db_path), "--show-run", run_id)
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            output = result.stdout + result.stderr
+            self.assertIn("Run Detail", output)
+            self.assertIn(run_id, output)
+            self.assertIn("Failed Pages", output)
+            self.assertIn("packet.pdf.txt", output)
+            self.assertIn("timeout", output)
+            self.assertIn("No OpenAI API calls were made", output)
+            self.assertNotIn("OPENAI_API_KEY is not set", output)
+
 
 if __name__ == "__main__":
     unittest.main()

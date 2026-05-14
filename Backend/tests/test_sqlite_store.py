@@ -134,8 +134,78 @@ class SQLiteStoreTests(unittest.TestCase):
 
         self.assertEqual(resume["processed"], {("packet.pdf.txt", 1)})
         self.assertEqual(resume["failed"], {("other.pdf.txt", 2)})
+        self.assertEqual(resume["failed_details"][0]["error_message"], "timeout")
         self.assertEqual(resume["token_usage"], {"input_tokens": 13, "output_tokens": 3, "total_tokens": 16})
         self.assertEqual(resume["results"][0]["reasoning"], "found conflict")
+
+    def test_list_runs_returns_recent_rows(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = SQLiteStore(Path(tmp) / "conflicts.sqlite3")
+            older = store.start_run(
+                input_year="2019",
+                input_dir="/inputs",
+                input_source="year",
+                provider="openai",
+                model="gpt-5.4-mini",
+                prompt_version="test",
+                output_stem="older",
+            )
+            newer = store.start_run(
+                input_year="2019",
+                input_dir="/inputs",
+                input_source="year",
+                provider="openai",
+                model="gpt-5.4-mini",
+                prompt_version="test",
+                output_stem="newer",
+            )
+            store.conn.execute(
+                "UPDATE runs SET started_at = ? WHERE run_id = ?",
+                ("2026-05-13T00:00:00+00:00", older),
+            )
+            store.conn.execute(
+                "UPDATE runs SET started_at = ? WHERE run_id = ?",
+                ("2026-05-14T00:00:00+00:00", newer),
+            )
+            store.conn.commit()
+
+            runs = store.list_runs(limit=1)
+            store.close()
+
+        self.assertEqual(len(runs), 1)
+        self.assertEqual(runs[0]["run_id"], newer)
+        self.assertEqual(runs[0]["output_stem"], "newer")
+
+    def test_get_run_and_failed_pages_for_run(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = SQLiteStore(Path(tmp) / "conflicts.sqlite3")
+            run_id = store.start_run(
+                input_year="2019",
+                input_dir="/inputs",
+                input_source="year",
+                provider="openai",
+                model="gpt-5.4-mini",
+                prompt_version="test",
+                output_stem="flags",
+            )
+            store.upsert_failed_result(
+                run_id,
+                "/inputs",
+                "packet.pdf.txt",
+                3,
+                token_usage={"input_tokens": 7, "output_tokens": 1, "total_tokens": 8},
+                error_message="rate limited",
+            )
+
+            run = store.get_run(run_id)
+            failed_pages = store.failed_pages_for_run(run_id)
+            store.close()
+
+        self.assertEqual(run["run_id"], run_id)
+        self.assertEqual(failed_pages[0]["file"], "packet.pdf.txt")
+        self.assertEqual(failed_pages[0]["page"], 3)
+        self.assertEqual(failed_pages[0]["error_message"], "rate limited")
+        self.assertEqual(failed_pages[0]["token_usage"]["total_tokens"], 8)
 
     def test_json_like_fields_round_trip(self):
         with tempfile.TemporaryDirectory() as tmp:
