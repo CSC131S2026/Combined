@@ -9,6 +9,7 @@ Coordinates:
 
 import csv
 import html
+import json
 import queue
 import sys
 import threading
@@ -52,6 +53,41 @@ def _format_token_usage_summary(usage) -> str:
     output_tokens = int(usage.get("output_tokens") or 0)
     total_tokens = int(usage.get("total_tokens") or (input_tokens + output_tokens))
     return f"{total_tokens:,} total ({input_tokens:,} in / {output_tokens:,} out)"
+
+
+def _json_generated_at(path: Path) -> str:
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except Exception:  # noqa: BLE001
+        return ""
+    if not isinstance(payload, dict):
+        return ""
+    meta = payload.get("meta")
+    if not isinstance(meta, dict):
+        return ""
+    return str(meta.get("generated_at") or "")
+
+
+def select_preferred_data_name(json_files: dict[str, Path]) -> str | None:
+    if not json_files:
+        return None
+
+    def _score(item: tuple[str, Path]) -> tuple[int, str, int, str]:
+        name, path = item
+        if name.startswith("conflict_flags_openai"):
+            priority = 3
+        elif name.startswith("conflict_flags"):
+            priority = 2
+        else:
+            priority = 1
+        try:
+            mtime_ns = path.stat().st_mtime_ns
+        except OSError:
+            mtime_ns = 0
+        return (priority, _json_generated_at(path), mtime_ns, name)
+
+    return max(json_files.items(), key=_score)[0]
 
 
 class ConflictDashboard:
@@ -609,10 +645,7 @@ class ConflictDashboard:
         return found
 
     def _preferred_data_name(self) -> str | None:
-        for candidate in ("conflict_flags_openai.json", "conflict_flags.json"):
-            if candidate in self._json_files:
-                return candidate
-        return next(iter(self._json_files), None)
+        return select_preferred_data_name(self._json_files)
 
     def _refresh_json_dropdown(self) -> None:
         self._json_files = self._scan_json_files()

@@ -31,6 +31,7 @@ MANIFEST
 #  before PyInstaller builds the exe, so as to inject date/other infos into it.
 *.manifest
 *.spec
+!ConflictChecker.spec
 
 # Installer logs
 pip-log.txt
@@ -214,6 +215,8 @@ __marimo__/
 Backend/conflict_flags_openai*.json
 Backend/conflict_flags_openai*.csv
 Backend/conflict_flags_openai*_checkpoint*.json
+Backend/conflict_checker.sqlite3
+Backend/conflict_checker.sqlite3-*
 Backend/api_cost_estimate*.md
 Backend/api_cost_estimate*.csv
 

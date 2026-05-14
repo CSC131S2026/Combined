@@ -24,6 +24,7 @@ from __future__ import annotations
 import asyncio
 import os
 import re
+import shutil
 import sys
 import threading
 from collections import deque
@@ -69,6 +70,13 @@ def user_workdir() -> Path:
         base.mkdir(parents=True, exist_ok=True)
         return base
     return _backend_root()
+
+
+def _copy_seed_file_if_missing(source: Path, destination: Path) -> None:
+    if not source.exists() or destination.exists():
+        return
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source, destination)
 
 
 class _QueueWriter:
@@ -232,6 +240,11 @@ class PipelineRunner:
             env_overrides.setdefault("CONFLICT_JSON_PATH", str(workdir / f"{output_stem}.json"))
             env_overrides.setdefault(
                 "CONFLICT_CHECKPOINT_PATH", str(workdir / f"{output_stem}_checkpoint.json")
+            )
+            env_overrides.setdefault("CONFLICT_DB_PATH", str(workdir / "conflict_checker.sqlite3"))
+            _copy_seed_file_if_missing(
+                backend / "conflict_checker.sqlite3",
+                workdir / "conflict_checker.sqlite3",
             )
             bundled_form700 = backend / "src" / "form700_parse" / "sac700.xlsx"
             if bundled_form700.exists():

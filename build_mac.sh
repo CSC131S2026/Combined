@@ -17,7 +17,7 @@ source .venv/bin/activate
 
 echo "==> Step: Install dependencies"
 pip install --quiet --upgrade pip
-pip install --quiet -r Frontend/requirements.txt pyinstaller
+pip install --quiet -r requirements.txt
 
 echo "==> Step: Clean prior build artifacts"
 rm -rf build
