@@ -1,4 +1,4 @@
-# Sacramento County Conflict of Interest Dashboard
+# Sacramento/Sonoma County Conflict of Interest Dashboard
 
 End-to-end pipeline for surfacing potential conflicts of interest in Sacramento County official filings. Scrapes packets from the county portal, extracts text, cross-references each filer against their Form 700 economic-interest disclosures, and uses an LLM to flag likely conflicts. A Tkinter dashboard lets a reviewer triage the results.
 
