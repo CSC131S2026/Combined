@@ -31,6 +31,7 @@ from collections import deque
 from pathlib import Path
 from typing import Callable
 
+from shared.output_naming import conflict_output_stem
 from shared.resource_path import is_frozen, resource_root
 
 
@@ -77,6 +78,26 @@ def _copy_seed_file_if_missing(source: Path, destination: Path) -> None:
         return
     destination.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(source, destination)
+
+
+def output_paths_for_selection(
+    workdir: Path,
+    *,
+    year: str | None,
+    input_dir: str | Path | None,
+) -> dict[str, str]:
+    """Absolute output paths for a pipeline run in a writable workdir."""
+    input_source = "custom" if input_dir else "year"
+    output_stem = conflict_output_stem(
+        input_year=year,
+        input_dir=input_dir,
+        input_source=input_source,
+    )
+    return {
+        "CONFLICT_CSV_PATH": str(workdir / f"{output_stem}.csv"),
+        "CONFLICT_JSON_PATH": str(workdir / f"{output_stem}.json"),
+        "CONFLICT_CHECKPOINT_PATH": str(workdir / f"{output_stem}_checkpoint.json"),
+    }
 
 
 class _QueueWriter:
@@ -281,13 +302,6 @@ class PipelineRunner:
             env_overrides["CONFLICT_SCRAPER_OUTPUT_DIR"] = str(scrape_root)
 
         if is_frozen():
-            stem_year = (year or "default").strip() or "default"
-            output_stem = f"conflict_flags_openai_{stem_year}"
-            env_overrides.setdefault("CONFLICT_CSV_PATH", str(workdir / f"{output_stem}.csv"))
-            env_overrides.setdefault("CONFLICT_JSON_PATH", str(workdir / f"{output_stem}.json"))
-            env_overrides.setdefault(
-                "CONFLICT_CHECKPOINT_PATH", str(workdir / f"{output_stem}_checkpoint.json")
-            )
             env_overrides.setdefault("CONFLICT_DB_PATH", str(workdir / "conflict_checker.sqlite3"))
             _copy_seed_file_if_missing(
                 backend / "conflict_checker.sqlite3",
@@ -325,6 +339,18 @@ class PipelineRunner:
                     cancelled = True
                 else:
                     input_dir = self._scrape_county(county_key, year, on_log)
+
+            if is_frozen():
+                frozen_output_paths = output_paths_for_selection(
+                    workdir,
+                    year=year,
+                    input_dir=input_dir,
+                )
+                for key, value in frozen_output_paths.items():
+                    if key not in prev_env:
+                        prev_env[key] = os.environ.get(key)
+                    os.environ[key] = value
+                self._emit(on_log, f"[runner] output JSON: {frozen_output_paths['CONFLICT_JSON_PATH']}")
 
             argv: list[str] = []
             if input_dir:

@@ -35,6 +35,10 @@ from ui.email_dialog import EmailDialog
 from ui.theme import COLORS, font, resolve_color
 
 
+SIDEBAR_WRAP = 232
+BRAND_TEXT_WIDTH = 188
+
+
 def _escape_reportlab_markup(value) -> str:
     """Escape dynamic text before it is passed to ReportLab Paragraph."""
     if value is None:
@@ -46,6 +50,18 @@ def _format_meta_timestamp(value) -> str:
     if not value:
         return "unknown"
     return str(value).replace("T", " ").replace("+00:00", " UTC")
+
+
+def _compact_path(value, max_chars: int = 58) -> str:
+    text = str(value or "")
+    if len(text) <= max_chars:
+        return text
+    path = Path(text)
+    if path.name:
+        tail = str(Path(path.parent.name) / path.name) if path.parent.name else path.name
+        if len(tail) <= max_chars - 4:
+            return f".../{tail}"
+    return f"...{text[-(max_chars - 3):]}"
 
 
 def _format_token_usage_summary(usage) -> str:
@@ -168,16 +184,18 @@ class ConflictDashboard:
         failed_csv = meta.get("failed_pages_csv") or "none"
 
         self._sidebar_records_lbl.configure(text=f"{shown:,} in view / {loaded_total:,} loaded")
-        self._sidebar_flags_lbl.configure(
-            text=f"{flagged_visible:,} conflicts in current view · {flagged_total:,} total flagged"
-        )
+        if flagged_visible == flagged_total:
+            flags_text = f"{flagged_visible:,} conflicts in view"
+        else:
+            flags_text = f"{flagged_visible:,} visible conflicts / {flagged_total:,} total"
+        self._sidebar_flags_lbl.configure(text=flags_text)
         self._sidebar_model_lbl.configure(text=f"{provider.upper()} / {model}")
         self._generated_time_lbl.configure(text=f"Generated {generated_at}")
-        self._generated_input_lbl.configure(text=f"Input {input_dir}")
+        self._generated_input_lbl.configure(text=f"Input {_compact_path(input_dir)}")
         self._generated_prompt_lbl.configure(text=f"Prompt {prompt_version}")
         self._generated_tokens_lbl.configure(text=f"Usage {token_summary}")
         self._generated_failures_lbl.configure(text=f"Failures {failed_pages:,} pages")
-        self._generated_failed_csv_lbl.configure(text=f"Failure CSV {failed_csv}")
+        self._generated_failed_csv_lbl.configure(text=f"Failure CSV {_compact_path(failed_csv)}")
 
     # ------------------------------------------------------------------
     # Body layout
@@ -329,6 +347,8 @@ class ConflictDashboard:
             font=font("section"),
             text_color=COLORS["text_primary"],
             anchor="w",
+            justify="left",
+            wraplength=SIDEBAR_WRAP,
         )
         self._sidebar_records_lbl.grid(row=0, column=0, padx=14, pady=(12, 1), sticky="ew")
 
@@ -338,6 +358,8 @@ class ConflictDashboard:
             font=font("body_small"),
             text_color=COLORS["text_secondary"],
             anchor="w",
+            justify="left",
+            wraplength=SIDEBAR_WRAP,
         )
         self._sidebar_flags_lbl.grid(row=1, column=0, padx=14, pady=(0, 1), sticky="ew")
 
@@ -646,16 +668,24 @@ class ConflictDashboard:
         ctk.CTkLabel(
             header,
             text="ConflictChecker",
-            font=font("headline"),
+            font=font("title", size=15),
             text_color=COLORS["text_primary"],
-        ).grid(row=0, column=1, sticky="sw")
+            anchor="w",
+            justify="left",
+            width=BRAND_TEXT_WIDTH,
+            wraplength=BRAND_TEXT_WIDTH,
+        ).grid(row=0, column=1, sticky="ew")
 
         ctk.CTkLabel(
             header,
-            text="Conflict Signals Dashboard",
+            text="Conflict Signals\nDashboard",
             font=font("body_small"),
             text_color=COLORS["text_secondary"],
-        ).grid(row=1, column=1, sticky="nw", pady=(2, 0))
+            anchor="w",
+            justify="left",
+            width=BRAND_TEXT_WIDTH,
+            wraplength=BRAND_TEXT_WIDTH,
+        ).grid(row=1, column=1, sticky="ew", pady=(2, 0))
 
     def _section_header(self, parent, text: str, description: str) -> None:
         block = ctk.CTkFrame(parent, fg_color="transparent")

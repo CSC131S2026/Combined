@@ -15,6 +15,7 @@ windowed .exe (onefile).
 
 import os
 import sys
+from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_all
 
@@ -41,11 +42,6 @@ if BUILD_ICON and not os.path.exists(BUILD_ICON):
 data_candidates = [
     ("assets/app_logo.png", "assets"),
     ("assets/app_icon.ico", "assets"),
-    ("Backend/conflict_flags_openai.json", "Backend"),
-    ("Backend/conflict_flags_openai.csv", "Backend"),
-    ("Backend/conflict_flags_openai_2019.json", "Backend"),
-    ("Backend/conflict_flags_openai_2019.csv", "Backend"),
-    ("Backend/conflict_flags_openai_2019_failed_pages.csv", "Backend"),
     ("Backend/conflict_checker.sqlite3", "Backend"),
 ]
 datas = []
@@ -55,6 +51,11 @@ for src, dest in data_candidates:
         datas.append((full, dest))
     else:
         print(f"[spec] WARNING: optional data file missing, skipping: {full}")
+
+for path in sorted((Path(PROJECT_ROOT) / "Backend").glob("conflict_flags*.csv")):
+    datas.append((str(path), "Backend"))
+for path in sorted((Path(PROJECT_ROOT) / "Backend").glob("conflict_flags*.json")):
+    datas.append((str(path), "Backend"))
 
 # Bundle non-Python data files from the Backend source tree (e.g. xlsx,
 # json fixtures) so the Pipeline tab can read them at runtime. Python

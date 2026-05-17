@@ -68,17 +68,22 @@ class BrowserAgent(BaseAgent):
             text="Browse the flagged record set",
             font=font("section", size=14),
             text_color=COLORS["text_primary"],
+            anchor="w",
+            justify="left",
+            wraplength=760,
         )
-        self._story_title.grid(row=0, column=0, padx=16, pady=(12, 2), sticky="w")
+        self._story_title.grid(row=0, column=0, padx=16, pady=(12, 2), sticky="ew")
 
         self._story_note = ctk.CTkLabel(
             strip,
             text="Select a row to inspect source details, participants, and reasoning.",
             font=font("body_small"),
             text_color=COLORS["text_secondary"],
+            anchor="w",
             justify="left",
+            wraplength=760,
         )
-        self._story_note.grid(row=1, column=0, padx=16, pady=(0, 12), sticky="w")
+        self._story_note.grid(row=1, column=0, padx=16, pady=(0, 12), sticky="ew")
 
         table_shell = ctk.CTkFrame(
             body,

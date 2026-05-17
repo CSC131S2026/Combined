@@ -171,6 +171,38 @@ class HigherSpecOpenAIInputSelectionTests(unittest.TestCase):
         self.assertIn("output_data/2022", output)
         self.assertNotIn("output_data/2021", output)
 
+    def test_2020_year_uses_distinct_output_stem(self):
+        result = self._run_without_api_key("--year", "2020")
+
+        self.assertNotEqual(result.returncode, 0)
+        output = result.stdout + result.stderr
+        self.assertIn("conflict_flags_openai_2020.csv", output)
+        self.assertIn("conflict_flags_openai_2020.json", output)
+
+    def test_custom_year_folder_uses_year_output_stem(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            input_dir = Path(tmp) / "output_data" / "2020"
+            input_dir.mkdir(parents=True)
+
+            result = self._run_without_api_key("--input-dir", str(input_dir))
+
+        self.assertNotEqual(result.returncode, 0)
+        output = result.stdout + result.stderr
+        self.assertIn("conflict_flags_openai_2020.csv", output)
+        self.assertIn("conflict_flags_openai_2020.json", output)
+
+    def test_county_year_folder_includes_county_in_output_stem(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            input_dir = Path(tmp) / "output_data" / "sonoma" / "2020"
+            input_dir.mkdir(parents=True)
+
+            result = self._run_without_api_key("--input-dir", str(input_dir))
+
+        self.assertNotEqual(result.returncode, 0)
+        output = (result.stdout + result.stderr).replace("\n", "")
+        self.assertIn("conflict_flags_openai_sonoma_2020.csv", output)
+        self.assertIn("conflict_flags_openai_sonoma_2020.json", output)
+
     def test_empty_custom_input_run_writes_input_metadata_without_openai_call(self):
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)

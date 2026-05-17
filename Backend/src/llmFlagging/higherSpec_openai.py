@@ -15,6 +15,7 @@ from pydantic import BaseModel, ValidationError
 from typing import Literal
 
 from shared.export_safety import neutralize_dataframe_for_spreadsheet
+from shared.output_naming import DEFAULT_CONFLICT_OUTPUT_BASE, conflict_output_stem, output_slug
 from src.web_scrapers.preprocess import cleanup, read_texts
 from src.llmFlagging.form700_paths import resolve_form700_path
 from src.form700_parse.seven import normalize_shf
@@ -74,7 +75,7 @@ _OPENAI_TIMEOUT_SECONDS = float(os.getenv("OPENAI_CONFLICT_TIMEOUT_SECONDS", "60
 _OPENAI_MAX_API_RETRIES = int(os.getenv("OPENAI_CONFLICT_MAX_API_RETRIES", "4"))
 _REQUEST_CONCURRENCY = int(os.getenv("OPENAI_CONFLICT_CONCURRENCY", "16"))
 _FORCE_PREPROCESS = os.getenv("CONFLICT_FORCE_PREPROCESS", "").strip().lower() in {"1", "true", "yes", "on"}
-_DEFAULT_OUTPUT_STEM = "conflict_flags_openai"
+_DEFAULT_OUTPUT_STEM = DEFAULT_CONFLICT_OUTPUT_BASE
 _DEFAULT_DB_NAME = "conflict_checker.sqlite3"
 _DEFAULT_RUN_HISTORY_LIMIT = 10
 
@@ -163,16 +164,19 @@ def _resolve_input_config(args=None, environ=None):
 
 
 def _slug(value):
-    return re.sub(r'[^A-Za-z0-9_.-]+', '_', str(value or '').strip()).strip('_') or 'default'
+    return output_slug(value)
 
 
 def _default_output_stem(environ=None):
     environ = os.environ if environ is None else environ
-    if "CONFLICT_OUTPUT_STEM" in environ:
-        return environ.get("CONFLICT_OUTPUT_STEM") or _DEFAULT_OUTPUT_STEM
-    if _INPUT_SOURCE == "year":
-        return f"{_DEFAULT_OUTPUT_STEM}_{_slug(_INPUT_YEAR)}"
-    return f"{_DEFAULT_OUTPUT_STEM}_{_slug(_INPUT_DIR.name or 'custom')}"
+    explicit_stem = environ.get("CONFLICT_OUTPUT_STEM") if "CONFLICT_OUTPUT_STEM" in environ else None
+    return conflict_output_stem(
+        input_year=_INPUT_YEAR,
+        input_dir=_INPUT_DIR,
+        input_source=_INPUT_SOURCE,
+        explicit_stem=explicit_stem,
+        output_base=_DEFAULT_OUTPUT_STEM,
+    )
 
 
 _INPUT_YEAR = _DEFAULT_INPUT_YEAR
