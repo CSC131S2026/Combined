@@ -45,7 +45,7 @@ environment, install, and dashboard commands above.
 │   ├── src/
 │   │   ├── form700_parse/      # Form 700 XLSX parser (sac700.xlsx is the canonical workbook)
 │   │   ├── llmFlagging/        # Conflict matchers — OpenAI, ChatOllama, and base implementations
-│   │   ├── web_scrapers/       # Selenium-based Sacramento County packet scraper + preprocess
+│   │   ├── web_scrapers/       # Selenium-based Sacramento/Sonoma County packet scraper + preprocess
 │   │   └── docuAgent/          # Document-writing agent helpers
 │   ├── tests/                  # Contract / regression tests (unittest)
 │   └── requirements.txt
